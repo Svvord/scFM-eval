@@ -1,7 +1,7 @@
 
 # scFM-eval
 
-**scFM-eval** is a unified, reproducible computational framework for deploying and evaluating **single-cell foundation models (scFMs)**.  
+**scFM-eval** is a unified, reproducible computational framework for deploying,  running, and evaluating **single-cell foundation models (scFMs)**.  
 It is built on **Nextflow DSL2** and provides standardized execution, containerized environments, and automated embedding inference across multiple scFM methods.
 
 ---
@@ -46,19 +46,42 @@ git clone https://github.com/Svvord/scFM-eval.git
 
 Open `nextflow.config` and select **one** container runtime:
 
+* **Apptainer**
+  (Default; no changes needed unless you modified it before)
+
+* **Singularity**
+```groovy
+singularity {
+    enabled = true
+    ...
+}
+docker {
+    enabled = false
+    ...
+}
+apptainer {
+    enabled = false
+    ...
+}
+```
+
 * **Docker**
 
 ```groovy
 docker {
     enabled = true
+    ...
 }
 apptainer {
     enabled = false
+    ...
+}
+singularity {
+    enabled = false
+    ...
 }
 ```
 
-* **Apptainer (Singularity)**
-  (Default; no changes needed unless you modified it before)
 
 > ⚠️ This only needs to be done **once**.
 > Subsequent runs require no further configuration.
