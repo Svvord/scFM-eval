@@ -1,0 +1,13 @@
+.nextflow
+.nextflow.log*
+results
+work
+data/model_weights/*
+!data/model_weights/README.md
+trace.txt
+scratch
+cache/.shared/*
+!cache/README.md
+cache/.home/*
+!cache/.home/README.md
+screenshot
