@@ -125,7 +125,71 @@ data/
 * If no version is specified, the framework will use the **default pretrained model**
 
 ---
+### Step 3. Input Data Preparation
 
+`scFM-eval` accepts **AnnData (`.h5ad`) files** as the standard input format.
+
+#### Required Data Format
+
+- **Expression matrix**:
+  - Raw **count matrix** (not log-normalized)
+  - Stored in `adata.X`
+  - Must contain the **full transcriptome**
+    - Do **not** subset to highly variable genes (HVGs)
+
+- **Gene metadata (`adata.var`)**:
+  - `var.index` **should primarily use HGNC gene symbols**
+    - This is required for the majority of genes
+  - **Genes without an official HGNC symbol**:
+    - May use their **Ensembl gene ID as a fallback identifier**
+    - This ensures all genes remain represented with a valid token
+    - Most scFM methods rely on token-based gene matching and can accommodate this behavior
+  - Required columns:
+    - `gene_symbol`: gene identifier used by the model
+      - HGNC gene symbol when available
+      - Ensembl gene ID used as a fallback when no HGNC symbol exists
+    - `ensembl_id`: corresponding Ensembl gene ID
+
+- **Cell metadata (`adata.obs`)**:
+  - Must contain a column named:
+    - `barcode`: unique cell barcode identifier
+  - In most cases, `barcode` can be a copy of `adata.obs_names`
+  - **All cell identifiers must be unique**
+    - If needed, ensure uniqueness by calling:
+      ```python
+      adata.obs_names_make_unique()
+      ```
+    - Then populate:
+      ```python
+      adata.obs["barcode"] = adata.obs_names
+      ```
+
+---
+
+### Data Preprocessing Policy
+
+`scFM-eval` performs **minimal preprocessing by design**.
+
+- Users are expected to perform **their own data quality control (QC)** prior to input,  
+  such as:
+  - Filtering low-quality cells
+  - Doublet removal (optional)
+
+- **Do NOT perform HVG selection**
+  - All scFM methods in this framework expect the **full gene expression profile**
+  - Subsetting to HVGs may lead to:
+    - Incompatible model inputs
+    - Silent gene dropping
+    - Degraded or misleading embeddings
+
+- Input data must preserve **raw counts across the full transcriptome**
+
+Please refer to the provided example dataset:
+```text
+data/demo/colon_1000.h5ad
+```
+
+---
 ## First Run Notes (Important)
 
 * On the **first execution of a method**, Nextflow will automatically:
@@ -225,9 +289,12 @@ If this framework or any of the tools provided here are useful for your research
 > Siyu Hou, Penghui Yang, Wenjing Ma, Jade Xiaoqing Wang and Xiang Zhou (2026). 
 > A unified framework enables accessible deployment and comprehensive benchmarking
 > of single-cell foundation models.
-
-> **BioRxiv preprint:** *Coming soon*
-
 ```
-
+@article{hou2026unified,
+  title = {A unified framework enables accessible deployment and comprehensive benchmarking of single-cell foundation models},
+  author = {Hou, Siyu and Yang, Penghui and Ma, Wenjing and Wang, Jade Xiaoqing and Zhou, Xiang},
+  year = {2026},
+  publisher = {Cold Spring Harbor Laboratory},
+  journal = {bioRxiv}
+}
 ```
