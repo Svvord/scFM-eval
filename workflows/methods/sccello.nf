@@ -1,6 +1,6 @@
 params.model = "scCello/scCello-zeroshot"
 params.batch_size = 64
-params.results_dir = "results"
+params.emb_results_dir = "results"
 
 process tokenize_by_sccello {
 
@@ -90,8 +90,8 @@ process postprocess_for_sccello {
 
     container "housy17/sccello:latest"
 
-    publishDir "${params.results_dir}/embeddings/sccello", mode: 'copy',
-               saveAs: { filename -> "${id}.h5ad" }
+    publishDir "${params.emb_results_dir}/embeddings/sccello", mode: 'copy',
+               saveAs: { filename -> "${id}.h5ad" }, enabled: params.emb_results_dir as boolean
 
     input:
     tuple val(id), path(raw_h5ad), path(embedding)

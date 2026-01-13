@@ -1,5 +1,5 @@
 params.model = "scFoundation/models.ckpt"
-params.results_dir = "results"
+params.emb_results_dir = "results"
 
 process preprocess_for_scfoundation {
 
@@ -83,8 +83,8 @@ process postprocess_for_scfoundation {
 
     container 'housy17/scfoundation:latest'
 
-    publishDir "${params.results_dir}/embeddings/scfoundation", mode: 'copy',
-               saveAs: { filename -> "${id}.h5ad" }
+    publishDir "${params.emb_results_dir}/embeddings/scfoundation", mode: 'copy',
+               saveAs: { filename -> "${id}.h5ad" }, enabled: params.emb_results_dir as boolean
 
     input:
     tuple val(id), path(raw_h5ad), path(embedding_npy)

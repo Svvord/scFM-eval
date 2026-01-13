@@ -1,6 +1,6 @@
 params.model = "CellFM/CellFM_80M_weight.ckpt"
 params.batch_size = 64
-params.results_dir = "results"
+params.emb_results_dir = "results"
 
 process embed_by_cellfm {
 
@@ -10,8 +10,8 @@ process embed_by_cellfm {
 
     container "housy17/cellfm:latest"
 
-    publishDir "${params.results_dir}/embeddings/cellfm", mode: 'copy',
-               saveAs: { filename -> "${id}.h5ad" }
+    publishDir "${params.emb_results_dir}/embeddings/cellfm", mode: 'copy',
+               saveAs: { filename -> "${id}.h5ad" }, enabled: params.emb_results_dir as boolean
 
     input:
     tuple val(id), path(raw_h5ad)

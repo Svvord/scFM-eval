@@ -1,6 +1,6 @@
 params.model = "scPRINT/v2-medium.ckpt"
 params.batch_size = 64
-params.results_dir = "results"
+params.emb_results_dir = "results"
 params.how = "random expr"
 params.max_len = 4000
 
@@ -129,7 +129,7 @@ process _embed_by_scprint {
 
     embedder = Embedder(
         # can work on random genes or most variables etc..
-        how="${params.how}}",
+        how="${params.how}",
         # number of genes to use
         max_len=${params.max_len},
         # the model is trained on a minibatch of 64 cells but you can choose whatever
@@ -176,8 +176,8 @@ process postprocess_for_scprint {
     
     container "housy17/scprint:latest"
 
-    publishDir "${params.results_dir}}/embeddings/scprint", mode: 'copy',
-               saveAs: { filename -> "${id}.h5ad" }
+    publishDir "${params.emb_results_dir}}/embeddings/scprint", mode: 'copy',
+               saveAs: { filename -> "${id}.h5ad" }, enabled: params.emb_results_dir as boolean
 
     input:
     tuple val(id), path(raw_h5ad), path(processed_h5ad)

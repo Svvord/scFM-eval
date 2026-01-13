@@ -1,5 +1,5 @@
 params.model = "CELLama/all-MiniLM-L6-v2"
-params.results_dir = "results"
+params.emb_results_dir = "results"
 params.top_k = 30
 
 process embed_by_cellama {
@@ -10,8 +10,8 @@ process embed_by_cellama {
 
     container "housy17/cellama:latest"
 
-    publishDir "results/embeddings/cellama", mode: 'copy',
-               saveAs: { filename -> "${id}.h5ad" }
+    publishDir "${params.emb_results_dir}/embeddings/cellama", mode: 'copy',
+               saveAs: { filename -> "${id}.h5ad" }, enabled: params.emb_results_dir as boolean
 
     input:
     tuple val(id), path(raw_h5ad)

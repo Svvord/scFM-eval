@@ -1,5 +1,5 @@
 params.model = "SCimilarity/model_v1.1"
-params.results_dir = "results"
+params.emb_results_dir = "results"
 
 process preprocess_for_scimilarity {
 
@@ -44,8 +44,8 @@ process _embed_by_scimilarity {
 
     container "housy17/scimilarity:latest"
 
-    publishDir "${params.results_dir}/embeddings/scimilarity", mode: 'copy',
-               saveAs: { filename -> "${id}.h5ad" }
+    publishDir "${params.emb_results_dir}/embeddings/scimilarity", mode: 'copy',
+               saveAs: { filename -> "${id}.h5ad" }, enabled: params.emb_results_dir as boolean
 
     input:
     tuple val(id), path(raw_h5ad)

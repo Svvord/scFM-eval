@@ -4,6 +4,8 @@
 **scFM-eval** is a unified, reproducible computational framework for deploying,  running, and evaluating **single-cell foundation models (scFMs)**.  
 It is built on **Nextflow DSL2** and provides standardized execution, containerized environments, and automated embedding inference across multiple scFM methods.
 
+**[2026.01.13]** We released the few-shot learning implementation, primarily designed for data with discrete labels, and fixed several minor bugs in **scPRINT** deployment.
+
 ---
 
 ## System Requirements
@@ -224,9 +226,7 @@ Required arguments:
 * `--method`: scFM method name (e.g. `scgpt`)
 * `--data`: input dataset in `.h5ad` format
 
----
-
-## Output
+### Output
 
 Results are written to:
 
@@ -243,6 +243,78 @@ embeddings = adata.X
 ```
 
 ---
+
+## Few-shot Learning
+
+Few-shot learning and label inference can be performed with **a single command**.
+
+We provide a small demo dataset consisting of a **support set** and a **query set**:
+
+```text
+data/demo/liver_1shot_support.h5ad
+data/demo/liver_1shot_query.h5ad
+```
+
+### Step 1: Fit Prototypes (Support Set)
+
+To fit class prototypes, set the mode to `fit` and provide the support dataset.
+
+```bash
+nextflow fewshot_by_scfm.nf \
+  --method scgpt \
+  --mode fit \
+  --support data/demo/liver_1shot_support.h5ad
+```
+
+This will generate a prototype file (`.npz`) saved to:
+
+```text
+results/fewshot/fitted_prototypes/<method_name>/
+```
+
+The generated `.npz` file contains the fitted class prototypes derived from the support set.
+
+
+### Step 2: Infer Labels (Query Set)
+
+To infer labels for a query dataset using the fitted prototypes, set the mode to `infer` and provide:
+
+* the query dataset
+* the path to the fitted prototype file
+
+```bash
+nextflow fewshot_by_scfm.nf \
+  --method scgpt \
+  --mode infer \
+  --query data/demo/liver_1shot_query.h5ad \
+  --fitted results/fewshot/fitted_prototypes/scgpt/liver_1shot_support.npz
+```
+
+Inference results are written to:
+
+```text
+results/fewshot/inference/<method_name>/
+```
+
+### One-step Fit + Inference
+
+You can also provide both the support and query datasets in a **single command**, which will automatically perform prototype fitting followed by inference:
+
+```bash
+nextflow fewshot_by_scfm.nf \
+  --method scgpt \
+  --support data/demo/liver_1shot_support.h5ad \
+  --query data/demo/liver_1shot_query.h5ad
+```
+
+### Notes
+
+* Few-shot learning is designed for datasets with **discrete label types**
+* The support dataset must contain ground-truth labels
+* The query dataset does not require labels and will be annotated during inference
+* By default, labels are read from `adata.obs['cell_type']`; this can be overridden using the `--label_key` option
+---
+
 
 ## Supported Methods & Environments
 

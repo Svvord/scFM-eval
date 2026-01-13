@@ -1,5 +1,5 @@
 params.batch_size = 64
-params.results_dir = "results"
+params.emb_results_dir = "results"
 
 process tokenize_by_langcell {
 
@@ -148,8 +148,8 @@ process postprocess_for_langcell {
 
     container "housy17/langcell:latest"
 
-    publishDir "${params.results_dir}/embeddings/langcell", mode: 'copy',
-               saveAs: { filename -> "${id}.h5ad" }
+    publishDir "${params.emb_results_dir}/embeddings/langcell", mode: 'copy',
+               saveAs: { filename -> "${id}.h5ad" }, enabled: params.emb_results_dir as boolean
 
     input:
     tuple val(id), path(raw_h5ad), path(embedding)

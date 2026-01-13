@@ -1,5 +1,5 @@
 params.model = "CellPLM/20231027_85M.best.ckpt"
-params.results_dir = "results"
+params.emb_results_dir = "results"
 
 process embed_by_cellplm {
 
@@ -9,8 +9,8 @@ process embed_by_cellplm {
 
     container "housy17/cellplm:latest"
 
-    publishDir "${params.results_dir}/embeddings/cellplm", mode: 'copy',
-               saveAs: { filename -> "${id}.h5ad" }
+    publishDir "${params.emb_results_dir}/embeddings/cellplm", mode: 'copy',
+               saveAs: { filename -> "${id}.h5ad" }, enabled: params.emb_results_dir as boolean
 
     input:
     tuple val(id), path(raw_h5ad) // 内部转成 log1p transformed

@@ -1,5 +1,5 @@
 params.model = "GenePT/ada-002"
-params.results_dir = "results"
+params.emb_results_dir = "results"
 
 // params for genept_s
 params.ntrunc = 30
@@ -12,8 +12,8 @@ process embed_by_genept_w {
 
     container "housy17/genept:latest"
 
-    publishDir "${params.results_dir}/embeddings/genept_w", mode: 'copy',
-               saveAs: { filename -> "${id}.h5ad" }
+    publishDir "${params.emb_results_dir}/embeddings/genept_w", mode: 'copy',
+               saveAs: { filename -> "${id}.h5ad" }, enabled: params.emb_results_dir as boolean
 
     input:
     tuple val(id), path(raw_h5ad)

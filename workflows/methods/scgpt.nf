@@ -1,6 +1,6 @@
 params.model = "scGPT/scGPT_human"
 params.batch_size = 64
-params.results_dir = "results"
+params.emb_results_dir = "results"
 
 process embed_by_scgpt {
 
@@ -10,8 +10,8 @@ process embed_by_scgpt {
 
     container 'housy17/scgpt:0.2.4'
 
-    publishDir "${params.results_dir}/embeddings/scgpt", mode: 'copy',
-               saveAs: { filename -> "${id}.h5ad" }
+    publishDir "${params.emb_results_dir}/embeddings/scgpt", mode: 'copy',
+               saveAs: { filename -> "${id}.h5ad" }, enabled: params.emb_results_dir as boolean
 
     input:
     tuple val(id), path(raw_h5ad) // update: raw_count, data transformed codes inside

@@ -1,6 +1,6 @@
 params.model = "Geneformer/Geneformer-V2-316M"
 params.batch_size = 64
-params.results_dir = "results"
+params.emb_results_dir = "results"
 
 process preprocess_for_geneformer {
 
@@ -88,8 +88,8 @@ process postprocess_for_geneformer {
 
     container 'housy17/geneformer:latest'
 
-    publishDir "${params.results_dir}/embeddings/geneformer", mode: 'copy',
-               saveAs: { filename -> "${id}.h5ad" }
+    publishDir "${params.emb_results_dir}/embeddings/geneformer", mode: 'copy',
+               saveAs: { filename -> "${id}.h5ad" }, enabled: params.emb_results_dir as boolean
 
     input:
     tuple val(id), path(raw_h5ad), path(embedding)

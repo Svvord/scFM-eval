@@ -1,5 +1,8 @@
 nextflow.enable.dsl=2
 
+params.method = null
+params.data   = null
+
 include { embed_by_scgpt } from './workflows/methods/scgpt'
 include { embed_by_cellama } from './workflows/methods/cellama'
 include { embed_by_cellfm } from './workflows/methods/cellfm'
@@ -14,8 +17,6 @@ include { embed_by_scimilarity } from './workflows/methods/scimilarity'
 include { embed_by_scprint } from './workflows/methods/scprint'
 include { embed_by_uce } from './workflows/methods/uce'
 
-params.method = null
-params.data   = null
 
 if( !params.method || !params.data )
     exit 1, "Usage: nextflow embed_by_scfm.nf --method <A|B|C> --data <path>"

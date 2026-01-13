@@ -1,6 +1,6 @@
 params.model = "scBERT/panglao_pretrain.pth"
 params.batch_size = 64
-params.results_dir = "results"
+params.emb_results_dir = "results"
 params.bin_num = 5
 
 process preprocess_for_scbert {
@@ -65,8 +65,8 @@ process _embed_by_scbert {
 
     container "housy17/scbert:latest"
 
-    publishDir "${params.results_dir}/embeddings/scbert", mode: 'copy',
-               saveAs: { filename -> "${id}.h5ad" }
+    publishDir "${params.emb_results_dir}/embeddings/scbert", mode: 'copy',
+               saveAs: { filename -> "${id}.h5ad" }, enabled: params.emb_results_dir as boolean
 
     input:
     tuple val(id), path(raw_h5ad), path(processed_h5ad)

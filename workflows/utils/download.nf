@@ -233,11 +233,21 @@ process download_scprint_checkpoints {
     script:
     """
     cd "${projectDir}/data/model_weights"
-    mkdir -p scPrint
-    cd scPrint
-    hf download jkobject/scPRINT "v2-medium.ckpt" --local-dir ./
-    echo "scPrint checkpoints downloaded!"
+    mkdir -p scPRINT
+    cd scPRINT
+    gdown --fuzzy https://drive.google.com/file/d/1B6GKVfd7SNSliwYF6Z3Wfyli63CMx1_z/view?usp=drive_link
+    echo "scPRINT checkpoints downloaded!"
     """
+    // Recently (Jan 2026), scPRINT was updated and all the previous checkpoints were removed,
+    // but I have a backup that I downloaded earlier.
+
+    // """
+    // cd "${projectDir}/data/model_weights"
+    // mkdir -p scPRINT
+    // cd scPRINT
+    // hf download jkobject/scPRINT "v2-medium.ckpt" --local-dir ./
+    // echo "scPRINT checkpoints downloaded!"
+    // """
 
 }
 
