@@ -274,3 +274,20 @@ process download_uce_checkpoints {
     """
 
 }
+
+process download_c2s_checkpoints {
+
+    container "housy17/scfm_download:latest"
+
+    output:
+    stdout
+
+    script:
+    """
+    cd "${projectDir}/data/model_weights"
+    mkdir -p C2S
+    cd C2S
+    hf download vandijklab/C2S-Pythia-410m-cell-type-prediction --local-dir ./C2S-Pythia-410m-cell-type-prediction
+    echo "C2S checkpoints downloaded!"
+    """
+}

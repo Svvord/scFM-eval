@@ -7,6 +7,7 @@ params.query   = null
 params.support = null
 params.fitted  = null
 
+include { fewshot_by_c2s } from "./workflows/tasks/few-shot.nf"
 include { fewshot_by_cellama } from "./workflows/tasks/few-shot.nf"
 include { fewshot_by_cellfm } from "./workflows/tasks/few-shot.nf"
 include { fewshot_by_cellplm } from "./workflows/tasks/few-shot.nf"
@@ -21,6 +22,7 @@ include { fewshot_by_scimilarity } from "./workflows/tasks/few-shot.nf"
 include { fewshot_by_scprint } from "./workflows/tasks/few-shot.nf"
 include { fewshot_by_uce } from "./workflows/tasks/few-shot.nf"
 
+include { inference_by_c2s } from "./workflows/tasks/few-shot.nf"
 include { inference_by_cellama } from "./workflows/tasks/few-shot.nf"
 include { inference_by_cellfm } from "./workflows/tasks/few-shot.nf"
 include { inference_by_cellplm } from "./workflows/tasks/few-shot.nf"
@@ -34,6 +36,10 @@ include { inference_by_scgpt } from "./workflows/tasks/few-shot.nf"
 include { inference_by_scimilarity } from "./workflows/tasks/few-shot.nf"
 include { inference_by_scprint } from "./workflows/tasks/few-shot.nf"
 include { inference_by_uce } from "./workflows/tasks/few-shot.nf"
+
+if( !params.method ) {
+    exit 1, """Please provide method name using --method parameter."""
+}
 
 if (!['fit', 'infer', 'fit_infer'].contains(params.mode)) {
     exit 1, """Invalid mode: ${params.mode}. Must be one of: fit_infer, fit, infer. Default: fit_infer
@@ -54,19 +60,12 @@ if (['infer', 'fit_infer'].contains(params.mode) && !params.query) {
     Please provide query data using --query parameter."""
 }
 if (params.mode=='infer' && !params.fitted) {
-    exit 1, """Query data is required for mode '${params.mode}'.
-    Please provide query data using --query parameter."""
+    exit 1, """Fitted model is required for mode '${params.mode}'.
+    Please provide fitted model using --fitted parameter."""
 }
 query_ch = ['infer', 'fit_infer'].contains(params.mode) ? Channel.fromPath(params.query) : null
 prototype_ch = params.mode=='infer' ? Channel.fromPath(params.fitted) : null
 infer_input = prototype_ch ? query_ch.combine(prototype_ch).map{ query, prototype -> tuple("${query.baseName}", query, prototype) } : null
-
-if (params.mode == 'fit_infer') {
-    all_input = support_ch.combine(query_ch).map{ support, query -> tuple("${support.baseName}", "${query.baseName}", support, query) }
-}
-else {
-    all_input = null
-}
 
 
 def parseMethods(String methodsStr) {
@@ -141,18 +140,25 @@ def runners = [
         'fit': { ch -> fewshot_by_uce(ch) },
         'infer': { ch -> inference_by_uce(ch) },
         'fit_infer': { ch -> fit_and_infer() }
-    ]
+    ],
+    'c2s': [
+        'fit': { ch -> fewshot_by_c2s(ch) },
+        'infer': { ch -> inference_by_c2s(ch) },
+        'fit_infer': { ch -> fit_and_infer() }
+    ],
 ]
 
 
 workflow fit_and_infer {
-    QueryChannel = Channel.fromPath(params.query).map{ file -> tuple("${file.baseName}", file) }
     Prototypes = runners[ selected ][ 'fit' ](fit_input)
     InferChannel = query_ch.combine(Prototypes).map{ query, foo, prototype -> tuple("${query.baseName}", query, prototype) }
     runners[ selected ][ 'infer' ](InferChannel)
 }
 
 workflow {
+
+    if( !runners[ selected ] )
+        exit 1, "Unknown method '${params.method}'. Allowed: ${runners.keySet().join(', ')}"
 
     def run = runners[ selected ][ params.mode ]
     

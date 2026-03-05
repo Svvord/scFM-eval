@@ -15,6 +15,7 @@ include { embed_by_sccello } from "../methods/sccello.nf"
 include { embed_by_scprint } from "../methods/scprint.nf"
 include { embed_by_cellplm } from "../methods/cellplm.nf"
 include { embed_by_genept_w } from "../methods/genept.nf"
+include { embed_by_c2s } from "../methods/c2s.nf"
 
 
 process prototypical_fit {
@@ -578,6 +579,43 @@ workflow inference_by_genept_w {
         InputChannel = Raw_H5ad_and_Prototypes_Channel.map{ id, h5ad, model -> tuple(id, h5ad) }
         embed_by_genept_w(InputChannel)
         SecondChannel = embed_by_genept_w.out
+            .combine(Raw_H5ad_and_Prototypes_Channel, by:0)
+            .map{ id, method, embedding, foo, model -> tuple(id, method, embedding, model)}
+        prototypical_inference(SecondChannel)
+
+    emit:
+        prototypical_inference.out
+}
+
+
+
+//==========================================
+//               C2S
+//==========================================
+
+
+workflow fewshot_by_c2s {
+    take:
+        Raw_H5ad_Channel
+
+    main:
+        InputChannel = embed_by_c2s(Raw_H5ad_Channel)
+        prototypical_fit(InputChannel)
+
+    emit:
+        prototypical_fit.out
+
+}
+
+workflow inference_by_c2s {
+    take:
+        Raw_H5ad_and_Prototypes_Channel
+        // tuple val(id), path(query_h5ad), path(prototypes)
+
+    main:
+        InputChannel = Raw_H5ad_and_Prototypes_Channel.map{ id, h5ad, model -> tuple(id, h5ad) }
+        embed_by_c2s(InputChannel)
+        SecondChannel = embed_by_c2s.out
             .combine(Raw_H5ad_and_Prototypes_Channel, by:0)
             .map{ id, method, embedding, foo, model -> tuple(id, method, embedding, model)}
         prototypical_inference(SecondChannel)

@@ -4,6 +4,8 @@
 **scFM-eval** is a unified, reproducible computational framework for deploying,  running, and evaluating **single-cell foundation models (scFMs)**.  
 It is built on **Nextflow DSL2** and provides standardized execution, containerized environments, and automated embedding inference across multiple scFM methods.
 
+**[2026.03.04]** We released the fine-tuning implementation, primarily designed for data with discrete labels.
+
 **[2026.01.13]** We released the few-shot learning implementation, primarily designed for data with discrete labels, and fixed several minor bugs in **scPRINT** deployment.
 
 ---
@@ -315,11 +317,78 @@ nextflow fewshot_by_scfm.nf \
 * By default, labels are read from `adata.obs['cell_type']`; this can be overridden using the `--label_key` option
 ---
 
+## Fine-tuning
+
+Fine-tuning and label prediction can also be performed with **a single command**.
+
+In the example below, we reuse `colon_1000.h5ad` as the training dataset. It contains cell-type labels in `adata.obs['cell_type']`. We also provide `colon_50.h5ad` as a small test dataset.
+
+```text
+data/demo/colon_1000.h5ad
+data/demo/colon_50.h5ad
+```
+
+### Step 1: Fine-tune Model
+
+To fine-tune a model, set the mode to `fit` and provide the training dataset.
+
+```bash
+nextflow finetune_by_scfm.nf \
+  --method scgpt \
+  --mode fit \
+  --train data/demo/colon_1000.h5ad
+```
+
+The fine-tuned model weights will be provided via a symlink and are saved by default to:
+
+```text
+results/finetune/finetuned_models/<method_name>/<train_data_id>/
+```
+You can then use this fine-tuned model for label prediction.
+
+### Step 2: Predict labels
+To predict labels, set the mode to `pred` and provide:
+- the directory containing the fine-tuned weights
+- the test dataset
+
+```bash
+nextflow finetune_by_scfm.nf \
+  --method scgpt \
+  --mode pred \
+  --fitted results/finetune/finetuned_models/scGPT/colon_1000 \
+  --test data/demo/colon_50.h5ad 
+```
+Prediction results are written to:
+```
+results/finetune/prediction/<method_name>/
+```
+
+### One-step Fine-tune + Predict
+You can also provide both the training and test datasets in a single command, which will automatically perform fine-tuning followed by prediction:
+
+```bash
+nextflow finetune_by_scfm.nf \
+  --method scgpt \
+  --train data/demo/colon_1000.h5ad \
+  --test data/demo/colon_50.h5ad
+```
+
+### Notes
+
+1. Some methods only support **zero-shot embeddings**. For these methods, we attach a task-agnostic post-hoc classifier, and the fine-tuning process actually optimizes this appended model. If the fine-tuned weight directory contains **only** a `posthoc_classifier/` folder, then `--fitted` should point to: `results/finetune/finetuned_models/<method_name>/<train_data_id>/posthoc_classifier/`. **CELLama is a special case**: it supports fine-tuning the backbone model but does not support native prediction/training in our pipeline. Therefore, we fine-tune both the backbone and the post-hoc classifier. In this case, you should still pass the same `--fitted` directory as in the scGPT example above, even though it may also contain a `posthoc_classifier/` folder.
+
+2. By default, labels are read from `adata.obs["cell_type"]`. Any **discrete** label field can be used in this workflow. To specify the label column, use `--finetune_label_key`.
+
+3. You can adjust the number of fine-tuning epochs and the training batch size depending on your GPU resources using: `--finetune_epoch` and `--finetune_batch_size`. We provide method-specific default `finetune_epoch` values (based on the original authors' fine-tuning recipes), so we generally do not recommend changing them unless you have a clear purpose.
+
+
+
 
 ## Supported Methods & Environments
 
 | Method | Container | Model Version | Notes |
 | ------ | --------- | ------------- | ----- |
+| Cell2Sentence (C2S)| [housy17/c2s:latest](https://hub.docker.com/repository/docker/housy17/c2s/general) | [v1.2.0](https://github.com/vandijklab/cell2sentence) |New method (zero/few-shot done; fine-tune pending)|
 | CELLama | [housy17/cellama:latest](https://hub.docker.com/repository/docker/housy17/cellama/general) | [v0.1.0](https://github.com/portrai-io/CELLama) |       |
 | CellFM | [housy17/cellfm:latest](https://hub.docker.com/repository/docker/housy17/cellfm/general) | [5054a2a](https://github.com/biomed-AI/CellFM-torch) |       |
 | CellPLM | [housy17/cellplm:latest](https://hub.docker.com/repository/docker/housy17/cellplm/general) | [v0.1.0](https://github.com/OmicsML/CellPLM) |       |

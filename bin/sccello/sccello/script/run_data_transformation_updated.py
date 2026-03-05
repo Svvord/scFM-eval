@@ -22,6 +22,7 @@ def parse_args():
     parser.add_argument("--num_proc", default=4)
     parser.add_argument("--add_cell_type", action="store_true")
     parser.add_argument("--is_cellxgene", default=False)
+    parser.add_argument('--label_key', type=str, default='cell_type', help='Key of the label column')
 
     args = parser.parse_args()
     return args
@@ -38,7 +39,8 @@ if __name__ == "__main__":
             h5ad_file = args.h5ad_data_path, 
             save_dir = args.save_dir, 
             is_cellxgene = args.is_cellxgene,
-            add_cell_type = args.add_cell_type
+            add_cell_type = args.add_cell_type,
+            label_key = args.label_key
         )
         pretrain_dataset.save_to_disk(data_file)
     else:

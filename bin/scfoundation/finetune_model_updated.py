@@ -132,6 +132,7 @@ if __name__ == '__main__':
     parser.add_argument('--warmup_steps', type=int, default=100)
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--early_stop_patience', type=int, default=4)
+    parser.add_argument('--label_key', type=str, default='cell_type', help='Key of the label column')
 
     args = parser.parse_args()
 
@@ -148,10 +149,10 @@ if __name__ == '__main__':
     torch.backends.cudnn.benchmark = False
 
     adata = sc.read_h5ad(args.data_path)
-    labels = adata.obs['cell_type'].tolist()
+    labels = adata.obs[args.label_key].tolist()
     label2id = {label: i for i, label in enumerate(np.unique(labels))}
     id2label = {i: label for label, i in label2id.items()}
-    adata.obs['cell_type'] = adata.obs['cell_type'].map(label2id)
+    adata.obs['cell_type'] = adata.obs[args.label_key].map(label2id)
     train_idx, val_idx = train_test_split(
         range(len(labels)), test_size=args.val_size,
         random_state=args.seed, stratify=labels,

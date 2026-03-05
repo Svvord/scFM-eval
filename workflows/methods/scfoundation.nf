@@ -127,3 +127,65 @@ workflow embed_by_scfoundation{
         postprocess_for_scfoundation.out
 }
 
+params.finetune_epoch        = 20
+params.finetune_eval_size    = 0.2
+params.finetune_batch_size   = 32
+params.predict_batch_size    = 64
+params.finetune_results_dir  = ""
+
+process _finetune_by_scfoundation {
+
+    tag "${id}"
+
+    label 'gpu_task'
+
+    container 'housy17/scfoundation:latest'
+
+    publishDir "${params.finetune_results_dir}/finetune/finetuned_models",
+               saveAs: { filename -> "scFoundation/${id}" }, enabled: params.finetune_results_dir as boolean
+
+    input:
+    tuple val(id), path(processed_h5ad)
+
+    output:
+    tuple val(id), path("*_finetuned_model")
+
+    script:
+    """
+    python /code/scfoundation/finetune_model_updated.py \\
+    --data_path ${processed_h5ad} \\
+    --ckpt_path "/data/model_weights/${params.model}" \\
+    --epochs ${params.finetune_epoch} \\
+    --batch_size ${params.finetune_batch_size} \\
+    --val_size ${params.finetune_eval_size} \\
+    --label_key ${params.finetune_label_key}
+    """
+}
+
+process _predict_by_scfoundation {
+
+    tag "${id}"
+
+    label "gpu_task"
+
+    container 'housy17/scfoundation:latest'
+
+    publishDir "${params.finetune_results_dir}/finetune/prediction", mode: 'copy', pattern: "*_predictions.tsv", 
+               saveAs: { filename -> "scFoundation/${id}_predicted_probs.tsv" }, enabled: params.finetune_results_dir as boolean
+
+    input:
+    tuple val(id), path(processed_test_h5ad), path(model_weights)
+
+    output:
+    tuple val(id), path("*_predictions.tsv")
+
+    script:
+    """
+    python /code/scfoundation/predict_updated.py \\
+    --data_path ${processed_test_h5ad} \\
+    --ckpt_path ${model_weights} \\
+    --backbone_path "/data/model_weights/${params.model}" \\
+    --batch_size ${params.predict_batch_size}
+    """
+
+}

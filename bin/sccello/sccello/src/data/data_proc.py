@@ -95,7 +95,8 @@ class ProcessSingleCellData(datasets.Dataset):
         save_dir=None,
         hf_suffix="_hf",
         is_cellxgene=False,
-        add_cell_type=False
+        add_cell_type=False,
+        label_key = "cell_type"
     ):
         """
         Transform a single h5ad data file to huggingface datasets, 
@@ -110,22 +111,23 @@ class ProcessSingleCellData(datasets.Dataset):
             print("Already cached to local file system, loading the data from disk.")
             return datasets.load_from_disk(cached_hf_dir)
     
-        hf_data = ProcessSingleCellData.from_h5ad_file(h5ad_file, is_cellxgene=is_cellxgene, add_cell_type=add_cell_type)
+        hf_data = ProcessSingleCellData.from_h5ad_file(h5ad_file, is_cellxgene=is_cellxgene, add_cell_type=add_cell_type, label_key=label_key)
         hf_data.save_to_disk(cached_hf_dir)
 
         return hf_data
 
     @staticmethod
-    def from_h5ad_file(h5ad_file, is_cellxgene=True, require_raw=True, add_cell_type=False):
+    def from_h5ad_file(h5ad_file, is_cellxgene=True, require_raw=True, add_cell_type=False, label_key="cell_type"):
         adata = anndata.read_h5ad(h5ad_file)
         h5ad_file_name, _ = os.path.splitext(os.path.basename(h5ad_file))
-        return ProcessSingleCellData.from_h5ad_adata(adata, h5ad_file_name, is_cellxgene=is_cellxgene, require_raw=require_raw, add_cell_type=add_cell_type)
+        return ProcessSingleCellData.from_h5ad_adata(adata, h5ad_file_name, is_cellxgene=is_cellxgene, require_raw=require_raw, add_cell_type=add_cell_type, label_key=label_key)
 
 
     @staticmethod
     def from_h5ad_adata(
         adata, h5ad_file_name, is_cellxgene=True, require_raw=True, batch_size=512,
-        add_cell_type=False # 是否添加 cell_type 数据, 来进行模型训练
+        add_cell_type=False, # 是否添加 cell_type 数据, 来进行模型训练
+        label_key="cell_type"
     ):
         # prepare gene ensembl ids
         gene_median_dict = data_loading.get_prestored_data("gene_median_dictionary_pkl")
@@ -236,7 +238,7 @@ class ProcessSingleCellData(datasets.Dataset):
             }
 
         if add_cell_type:
-            cell_ct = adata.obs["cell_type"].tolist()
+            cell_ct = adata.obs[label_key].tolist()
             dataset_dict["cell_type"] = cell_ct
 
         return datasets.Dataset.from_pandas(pd.DataFrame(dataset_dict))

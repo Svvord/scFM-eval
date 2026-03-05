@@ -97,3 +97,69 @@ workflow embed_by_scbert {
     emit:
         _embed_by_scbert.out
 }
+
+params.finetune_epoch        = 20
+params.finetune_eval_size    = 0.2  // 默认就是 0.2
+params.finetune_batch_size   = 8
+params.predict_batch_size    = 32
+params.finetune_results_dir  = ""
+
+process _finetune_by_scbert {
+
+    tag "${id}"
+    
+    label "gpu_task"
+
+    container "housy17/scbert:latest"
+
+    publishDir "${params.finetune_results_dir}/finetune/finetuned_models",
+               saveAs: { filename -> "scBERT/${id}" }, enabled: params.finetune_results_dir as boolean
+
+    input:
+    tuple val(id), path(processed_h5ad)
+
+    output:
+    tuple val(id), path("*_finetuned_model")
+
+    script:
+    def grad_acc = Math.round(3 * 60 / params.finetune_batch_size)
+    """
+    torchrun --standalone --nproc_per_node=1 /code/scbert/finetune_updated.py \\
+        --data_path ${processed_h5ad} \\
+        --model_path "/data/model_weights/${params.model}" \\
+        --batch_size ${params.finetune_batch_size} \\
+        --grad_acc ${grad_acc} \\
+        --epoch ${params.finetune_epoch}  \\
+        --eval_size ${params.finetune_eval_size} \\
+        --ckpt_dir "./scbert_finetuned_model/" \\
+        --model_name finetune \\
+        --label_key ${params.finetune_label_key}
+    """
+}
+
+process _predict_by_scbert {
+
+    tag "${id}"
+    
+    label "gpu_task"
+
+    container "housy17/scbert:latest"
+
+    publishDir "${params.finetune_results_dir}/finetune/prediction", mode: 'copy', pattern: "*_predictions.tsv", 
+               saveAs: { filename -> "scBERT/${id}_predicted_probs.tsv" }, enabled: params.finetune_results_dir as boolean
+
+    input:
+    tuple val(id), path(processed_test_h5ad), path(model_weights)
+
+    output:
+    tuple val(id), path("*_predictions.tsv")
+
+    script:
+    """
+    python /code/scbert/predict_updated.py \\
+        --data_path ${processed_test_h5ad} \\
+        --model_path ${model_weights} \\
+        --batch_size ${params.predict_batch_size}
+    """
+
+}

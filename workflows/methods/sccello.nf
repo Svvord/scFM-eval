@@ -131,3 +131,123 @@ workflow embed_by_sccello {
         postprocess_for_sccello.out
 }
 
+
+params.finetune_epoch        = 20
+params.finetune_eval_size    = 0.1
+params.finetune_batch_size   = 32
+params.predict_batch_size    = 64
+params.finetune_results_dir  = ""
+
+process tokenize_by_sccello_with_ct {
+
+    tag "${id}"
+
+    container "housy17/sccello:latest"
+
+    input:
+    tuple val(id), path(raw_h5ad)
+    val add_cell_type  // 添加布尔值参数
+
+    output:
+    tuple val(id), path(raw_h5ad), path("results/tokenized_dataset") // tokenized dataset
+
+    script:
+    def cell_type_flag = add_cell_type ? '--add_cell_type' : ''
+    """
+    python /code/sccello/sccello/script/run_data_transformation_updated.py \\
+        --h5ad_data_path ${raw_h5ad} --label_key ${params.finetune_label_key} ${cell_type_flag}
+    """
+}
+
+process _finetune_by_sccello {
+
+    tag "${id}"
+
+    label "gpu_task"
+
+    container "housy17/sccello:latest"
+
+    publishDir "${params.finetune_results_dir}/finetune/finetuned_models",
+               saveAs: { filename -> "scCello/${id}" }, enabled: params.finetune_results_dir as boolean
+    
+    input:
+    tuple val(id), path(raw_h5ad), path(tokenized_dataset)
+
+    output:
+    tuple val(id), path("*_finetuned_model")
+
+    script:
+    """
+    torchrun --standalone --nproc_per_node=1 /code/sccello/finetune.py \\
+        --pretrained_model "/data/model_weights/${params.model}" \\
+        --tokenized_dataset ${tokenized_dataset} \\
+        --batch_size ${params.finetune_batch_size} \\
+        --eval_size ${params.finetune_eval_size} \\
+        --epochs ${params.finetune_epoch}
+    """
+    
+}
+
+
+process _predict_by_sccello {
+
+    tag "${id}"
+
+    label "gpu_task"
+
+    container "housy17/sccello:latest"
+
+    publishDir "${params.finetune_results_dir}/finetune/prediction", mode: 'copy', pattern: "*_predictions.tsv", 
+               saveAs: { filename -> "scCello/${id}_predicted_probs.tsv" }, enabled: params.finetune_results_dir as boolean
+
+    input:
+    tuple val(id), path(processed_test_h5ad), path(model_weights)
+
+    output:
+    tuple val(id), path("*_predictions.tsv")
+
+    script:
+    """
+    #!/usr/bin/env python
+    import os
+    import sys
+    sys.path.append("/code/sccello")
+    import json
+    from pathlib import Path
+    from datasets import load_from_disk
+    from sccello.src.model_prototype_contrastive import PrototypeContrastiveForSequenceClassification
+    from sccello.src.collator.collator_for_classification import DataCollatorForCellClassification
+    from transformers import TrainingArguments, Trainer
+    import torch
+    from scipy.special import softmax
+
+    dataset = load_from_disk("${processed_test_h5ad}")
+    model_dir = Path("${model_weights}")
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = PrototypeContrastiveForSequenceClassification.from_pretrained(model_dir).to(device)
+
+    args = TrainingArguments(
+        output_dir="test_output",
+        per_device_eval_batch_size=${params.predict_batch_size},
+        report_to="none",
+    )
+
+    trainer = Trainer(
+        model=model,
+        args=args,
+        data_collator=DataCollatorForCellClassification(
+            model_input_name=["input_ids"],
+            pad_to_multiple_of=None
+        ),
+    )
+
+    pred = trainer.predict(dataset)
+    probs = softmax(pred.predictions, axis=-1)
+    label_names = [model.config.id2label[i] for i in range(len(model.config.id2label))]
+    import pandas as pd
+    df = pd.DataFrame(probs, columns=label_names, index=dataset['barcode'])
+    df.to_csv("sccello_predictions.tsv", sep="\\t")
+    """
+
+}

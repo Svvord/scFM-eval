@@ -3,7 +3,7 @@ nextflow.enable.dsl=2
 params.method = null
 params.data   = null
 
-include { embed_by_scgpt } from './workflows/methods/scgpt'
+include { embed_by_c2s } from './workflows/methods/c2s'
 include { embed_by_cellama } from './workflows/methods/cellama'
 include { embed_by_cellfm } from './workflows/methods/cellfm'
 include { embed_by_cellplm } from './workflows/methods/cellplm'
@@ -13,6 +13,7 @@ include { embed_by_langcell } from './workflows/methods/langcell'
 include { embed_by_scbert } from './workflows/methods/scbert'
 include { embed_by_sccello } from './workflows/methods/sccello'
 include { embed_by_scfoundation } from './workflows/methods/scfoundation'
+include { embed_by_scgpt } from './workflows/methods/scgpt'
 include { embed_by_scimilarity } from './workflows/methods/scimilarity'
 include { embed_by_scprint } from './workflows/methods/scprint'
 include { embed_by_uce } from './workflows/methods/uce'
@@ -46,6 +47,7 @@ workflow {
         'scimilarity': { ch -> embed_by_scimilarity(ch) },
         'scprint': { ch -> embed_by_scprint(ch) },
         'uce': { ch -> embed_by_uce(ch) },
+        'c2s': { ch -> embed_by_c2s(ch) },
     ]
 
     def run = runners[ selected ]

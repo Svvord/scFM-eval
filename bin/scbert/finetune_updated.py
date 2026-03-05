@@ -44,6 +44,7 @@ parser.add_argument("--data_path", type=str, default='./data/Zheng68K.h5ad', hel
 parser.add_argument("--model_path", type=str, default='./panglao_pretrained.pth', help='Path of pretrained model.')
 parser.add_argument("--ckpt_dir", type=str, default='./ckpts/', help='Directory of checkpoint to save.')
 parser.add_argument("--model_name", type=str, default='finetune', help='Finetuned model name.')
+parser.add_argument('--label_key', type=str, default='cell_type', help='Key of the label column')
 
 args = parser.parse_args()
 local_rank = int(os.environ.get("LOCAL_RANK", args.local_rank))
@@ -126,7 +127,7 @@ class Identity(torch.nn.Module):
         return x
 
 data = sc.read_h5ad(args.data_path)
-label_dict, label = np.unique(np.array(data.obs['cell_type']), return_inverse=True)  # Convert strings categorical to integrate categorical, and label_dict[label] can be restored
+label_dict, label = np.unique(np.array(data.obs[args.label_key]), return_inverse=True)  # Convert strings categorical to integrate categorical, and label_dict[label] can be restored
 #store the label dict and label for prediction
 with open('label_dict', 'wb') as fp:
     pkl.dump(label_dict, fp)
