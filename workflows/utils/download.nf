@@ -197,7 +197,7 @@ process download_scfoundation_checkpoints {
     cd "${projectDir}/data/model_weights"
     mkdir -p scFoundation
     cd scFoundation
-    gdown --fuzzy https://drive.google.com/file/d/1lnj6OcLCQUQmh8mNEyHdHA6i4oHOCHAu/view?usp=drive_link
+    hf download genbio-ai/scFoundation "models.ckpt" --local-dir ./
     echo "scFoundation checkpoints downloaded!"
     """
 

@@ -11,3 +11,7 @@ cache/.shared/*
 cache/.home/*
 !cache/.home/README.md
 screenshot
+# Python bytecode/cache
+__pycache__/
+*.py[cod]
+*$py.class
