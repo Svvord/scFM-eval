@@ -14,6 +14,8 @@ include { download_scimilarity_checkpoints } from './workflows/utils/download'
 include { download_scprint_checkpoints } from './workflows/utils/download'
 include { download_uce_checkpoints } from './workflows/utils/download'
 include { download_c2s_checkpoints } from './workflows/utils/download'
+include { download_scvi_checkpoints } from './workflows/utils/download'
+include { download_novae_checkpoints } from './workflows/utils/download'
 
 
 
@@ -44,8 +46,10 @@ workflow {
         'scfoundation': { ch -> download_scfoundation_checkpoints() },
         'scimilarity': { ch -> download_scimilarity_checkpoints() },
         'scprint': { ch -> download_scprint_checkpoints() },
+        'scvi': { ch -> download_scvi_checkpoints() },
         'uce': { ch -> download_uce_checkpoints() },
         'c2s': { ch -> download_c2s_checkpoints() },
+        'novae': { ch -> download_novae_checkpoints() },
     ]
 
     def run = runners[ selected ]
