@@ -184,6 +184,23 @@ class CommandLineTests(unittest.TestCase):
         self.assertIn(os.path.join(self.sb.pipeline, "main.nf"), cmd)
         self.assertFalse(os.listdir(os.path.join(ws, "runs")))  # dry run leaves nothing behind
 
+    def test_embed_batch_key_only_for_integration_methods(self):
+        ws = os.path.join(self.sb.dir, "ws")
+        self.sb.run("init", ws, "--runtime", "apptainer")
+        data = os.path.join(ws, "x.h5ad")
+        open(data, "w").close()
+        r = self.sb.run("embed", "--method", "harmony", "--data", data, "--batch-key", "donor", "--dry-run", cwd=ws)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        params = json.loads(r.stdout.split("params.json:")[1].split("command (")[0])
+        self.assertEqual(params["batch_key"], "donor")
+        self.assertEqual(params["emb_results_dir"], os.path.join(os.path.realpath(ws), "results"))
+        self.assertNotIn("--batch-key is only used", r.stderr)
+        r = self.sb.run("embed", "--method", "scgpt", "--data", data, "--batch-key", "donor", "--dry-run", cwd=ws)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("--batch-key is only used", r.stderr)
+        r = self.sb.run("embed", "--method", "scgpt", "--data", os.path.join(ws, "missing.h5ad"), "--dry-run", cwd=ws)
+        self.assertEqual(r.returncode, 2)
+
     def test_dev_checkout_mode_omits_duplicate_config(self):
         # workspace == pipeline dir: Nextflow auto-loads <pipeline>/nextflow.config, so no -c
         r = self.sb.run("init", self.sb.pipeline, "--runtime", "apptainer")

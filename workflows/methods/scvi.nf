@@ -113,14 +113,14 @@ process integrate_by_scvi {
 
     container 'scverse/scvi-tools:py3.11-cu12-runtime-stable'
 
-    publishDir "${params.emb_results_dir}/embeddings/scvi_integrated", mode: 'copy',
+    publishDir "${params.emb_results_dir}/embeddings/scvi_denovo", mode: 'copy',
                saveAs: { filename -> "${id}.h5ad" }, enabled: params.emb_results_dir as boolean
 
     input:
     tuple val(id), path(raw_h5ad)
 
     output:
-    tuple val(id), val("scVI (integrated)"), path("*embeddings.h5ad")
+    tuple val(id), val("scVI (de novo)"), path("*embeddings.h5ad")
 
     script:
     """
@@ -137,7 +137,9 @@ process integrate_by_scvi {
     original_spatial = adata.obsm["spatial"].copy() if "spatial" in adata.obsm else None
 
     if "${params.batch_key}" not in adata.obs:
-        raise KeyError("scVI integration requires adata.obs['${params.batch_key}']")
+        # No batch annotation: train scVI on the dataset as a single batch.
+        print("WARNING: obs['${params.batch_key}'] not found; treating all cells as a single batch.")
+        adata.obs["${params.batch_key}"] = "batch0"
 
     # scVI expects raw counts in X.
     if not issparse(adata.X):

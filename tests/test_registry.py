@@ -13,7 +13,6 @@ TASK_FILES = {
     "embed": ["workflows/tasks/embed.nf", "embed_by_scfm.nf"],
     "fewshot": ["workflows/tasks/fewshot.nf", "fewshot_by_scfm.nf"],
     "finetune": ["workflows/tasks/finetune.nf", "finetune_by_scfm.nf"],
-    "integrate": ["workflows/tasks/integrate.nf", "batch_integration_by_scfm.nf"],
 }
 
 
@@ -73,8 +72,9 @@ class RegistryConsistencyTest(unittest.TestCase):
     def test_registry_entries_are_well_formed(self):
         for mid, spec in self.registry.items():
             self.assertRegex(mid, r"^[a-z0-9_]+$")
-            for key in ("name", "container", "tasks"):
+            for key in ("name", "category", "container", "tasks"):
                 self.assertIn(key, spec, mid)
+            self.assertIn(spec["category"], ("zero-shot", "reference", "integration"), mid)
             self.assertTrue(spec["tasks"], mid)
 
 

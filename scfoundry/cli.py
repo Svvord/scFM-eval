@@ -45,7 +45,6 @@ TASKS = OrderedDict([
     ("embed",     dict(help="Zero-shot cell embeddings", implemented=True)),
     ("fewshot",   dict(help="Few-shot prototype fitting / label inference", implemented=False)),
     ("finetune",  dict(help="Fine-tuning / label prediction", implemented=False)),
-    ("integrate", dict(help="Batch-aware integrated embeddings", implemented=False)),
     ("benchmark", dict(help="Score embeddings (cell-type conservation, batch mixing)", implemented=False)),
 ])
 
@@ -55,7 +54,6 @@ OUTDIR_PARAMS = {
     "embed": ["emb_results_dir"],
     "fewshot": ["emb_results_dir", "fewshot_results_dir"],
     "finetune": ["emb_results_dir", "finetune_results_dir"],
-    "integrate": ["emb_results_dir"],
     "benchmark": ["results_dir"],
 }
 
@@ -540,6 +538,10 @@ def cmd_embed(args, registry, extra):
         params["model"] = args.model
     if args.batch_size is not None:
         params["batch_size"] = args.batch_size
+    if args.batch_key:
+        if registry[method].get("category") != "integration":
+            warn("--batch-key is only used by integration methods; '{}' ignores it".format(method))
+        params["batch_key"] = args.batch_key
     return launch("embed", method, input_id(data), params, args, extra)
 
 
@@ -554,11 +556,11 @@ def cmd_list(args, registry):
         if args.task not in TASKS:
             die("unknown task '{}'".format(args.task))
         items = [(m, s) for m, s in items if args.task in s.get("tasks", [])]
-    print("{:<14} {:<14} {:<4} {:<44} {}".format("method", "name", "gpu", "tasks", "container"))
+    print("{:<18} {:<20} {:<12} {:<4} {:<34} {}".format("method", "name", "category", "gpu", "tasks", "container"))
     for mid, spec in items:
         tasks = [t for t in TASKS if t in spec.get("tasks", [])]
-        print("{:<14} {:<14} {:<4} {:<44} {}".format(
-            mid, spec.get("name", mid), "yes" if spec.get("gpu", True) else "no",
+        print("{:<18} {:<20} {:<12} {:<4} {:<34} {}".format(
+            mid, spec.get("name", mid), spec.get("category", ""), "yes" if spec.get("gpu", True) else "no",
             ",".join(tasks), spec.get("container", "")))
     return 0
 
@@ -657,12 +659,17 @@ def build_parser():
     add_task_options(p)
 
     p = sub.add_parser("embed", help=TASKS["embed"]["help"],
-                       description="Compute zero-shot cell embeddings with a pretrained model. Output: "
+                       description="Compute cell embeddings: zero-shot with a pretrained scFM, a reference method "
+                                   "(pca, scvi), or an integration method that trains on your data using batch labels "
+                                   "(scgpt_integrated, scvi_denovo, harmony, seurat_cca, seurat_rpca). Output: "
                                    "<outdir>/embeddings/<method>/<input-id>.h5ad (embedding matrix in .X, original obs kept).")
     p.add_argument("--method", required=True, help="method to run (see 'list methods --task embed')")
     p.add_argument("--data", required=True, metavar="H5AD", help="input AnnData: raw counts in X, gene symbols in var")
     p.add_argument("--model", help="model variant under data/model_weights, e.g. scGPT/scGPT_human (default: the method's default)")
     p.add_argument("--batch-size", type=int, help="inference batch size (default: the method's default)")
+    p.add_argument("--batch-key", metavar="OBS_COLUMN",
+                   help="obs column holding batch labels, used by the integration methods only "
+                        "(default: batch_id; a missing column is treated as a single batch)")
     add_task_options(p)
 
     p = sub.add_parser("list", help="list methods or tasks")

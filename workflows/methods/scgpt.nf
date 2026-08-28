@@ -1296,7 +1296,10 @@ process integrate_by_scgpt {
     original_spatial = adata.obsm["spatial"].copy() if "spatial" in adata.obsm else None
 
     if "${params.batch_key}" not in adata.obs:
-        raise KeyError("scGPT integration requires adata.obs['${params.batch_key}']")
+        # No batch annotation: fine-tune on the dataset as a single batch (the
+        # batch-correction objectives are disabled below when < 2 batches).
+        logger.info("obs['${params.batch_key}'] not found; treating all cells as a single batch.")
+        adata.obs["${params.batch_key}"] = "batch0"
 
     adata.var["gene_name"] = adata.var.index.tolist()
     adata.obs["str_batch"] = adata.obs["${params.batch_key}"].astype(str)
