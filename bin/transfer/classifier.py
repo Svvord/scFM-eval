@@ -7,12 +7,13 @@ embeddings, then predict labels for query cell embeddings.
     classifier.py predict --embedding query.h5ad --model <model_dir> --out-prefix <id>
 
 Classifiers
-  prototype  class-mean prototypes; query cells are scored by softmax(-cosine distance)
-             (the few-shot protocol of the manuscript)
-  knn        k-nearest neighbours in the reference (cosine metric, distance-weighted
-             votes; k is capped at the reference size)
-  logreg     z-scored embeddings + multinomial logistic regression (linear probe)
-  mlp        the manuscript's post-hoc MLP head (celltype_annotation_finetune.py)
+  prototype  L2-normalised class-mean prototypes; cosine similarity to the query cell,
+             probabilities = softmax(similarity / 0.1)
+  knn        k nearest reference cells (L2-normalised, cosine metric), majority vote;
+             k defaults to 15 and is capped at the reference size
+  logreg     z-scored embeddings + L2-regularised multinomial logistic regression
+  mlp        two-layer MLP head trained with a validation split and early stopping
+             (celltype_annotation_finetune.py)
 
 The model directory holds meta.json plus model.npz (prototype/knn/logreg) or an mlp/
 directory. Prediction writes <prefix>_predicted_probs.tsv (barcode x class) and
@@ -29,13 +30,17 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 from scipy.sparse import issparse
-from scipy.spatial.distance import cdist
 from scipy.special import softmax
 
 CLASSIFIERS = ("prototype", "knn", "logreg", "mlp")
 HERE = os.path.dirname(os.path.abspath(__file__))
 POSTHOC_FIT = os.path.join(os.path.dirname(HERE), "celltype_annotation_finetune.py")
 POSTHOC_PREDICT = os.path.join(os.path.dirname(HERE), "celltype_annotation_predict.py")
+
+
+def l2norm(X):
+    X = np.asarray(X, dtype=np.float64)
+    return X / np.maximum(np.linalg.norm(X, axis=1, keepdims=True), 1e-12)
 
 
 def load_embedding(path, label_key=None):
@@ -72,14 +77,23 @@ def fit(args):
     os.makedirs(args.out, exist_ok=True)
 
     if args.classifier == "prototype":
-        prototypes = np.stack([X[y == c].mean(axis=0) for c in classes])
+        Xn = l2norm(X)
+        prototypes = l2norm(np.stack([Xn[y == c].mean(axis=0) for c in classes]))
+        meta["hyperparameters"] = {"temperature": args.temperature}
         np.savez_compressed(os.path.join(args.out, "model.npz"), prototypes=prototypes, classes=np.array(classes))
 
     elif args.classifier == "knn":
         k = int(min(args.knn_k, X.shape[0]))
-        meta["hyperparameters"] = {"k": k, "metric": "cosine", "weights": "distance"}
+        if k < args.knn_k:
+            print("WARNING: the reference has only {} cells, fewer than k={}; k was capped at {} and the majority "
+                  "vote runs over the whole reference. Set --knn-k explicitly for such a small reference.".format(
+                      X.shape[0], args.knn_k, k))
+        elif k > int(counts.min()):
+            print("WARNING: k={} exceeds the smallest class ({} cells); majority votes may never select that class. "
+                  "Consider a smaller --knn-k.".format(k, int(counts.min())))
+        meta["hyperparameters"] = {"k": k, "metric": "cosine", "weights": "uniform"}
         y_idx = np.array([classes.index(c) for c in y], dtype=np.int64)   # integer codes: no object arrays in the npz
-        np.savez_compressed(os.path.join(args.out, "model.npz"), X=X, y=y_idx, classes=np.array(classes))
+        np.savez_compressed(os.path.join(args.out, "model.npz"), X=l2norm(X), y=y_idx, classes=np.array(classes))
 
     elif args.classifier == "logreg":
         from sklearn.linear_model import LogisticRegression
@@ -144,14 +158,14 @@ def predict(args):
     else:
         m = np.load(os.path.join(args.model, "model.npz"), allow_pickle=False)
         if clf == "prototype":
-            dist = cdist(X, m["prototypes"], metric="cosine")
-            P = softmax(-dist, axis=-1)
+            sim = l2norm(X) @ m["prototypes"].T
+            P = softmax(sim / float(meta["hyperparameters"].get("temperature", 0.1)), axis=-1)
         elif clf == "knn":
             from sklearn.neighbors import KNeighborsClassifier
             k = int(meta["hyperparameters"]["k"])
-            knn = KNeighborsClassifier(n_neighbors=k, metric="cosine", weights="distance").fit(m["X"], m["y"])
+            knn = KNeighborsClassifier(n_neighbors=k, metric="cosine", weights="uniform").fit(m["X"], m["y"])
             P = np.zeros((X.shape[0], len(classes)), dtype=np.float64)
-            P[:, knn.classes_] = knn.predict_proba(X)          # classes_ are the integer codes present in the reference
+            P[:, knn.classes_] = knn.predict_proba(l2norm(X))  # classes_ are the integer codes present in the reference
         elif clf == "logreg":
             Z = (X - m["mean"]) / m["scale"]
             z = Z @ m["coef"].T + m["intercept"]
@@ -180,9 +194,10 @@ def main():
     f.add_argument("--method", default="")
     f.add_argument("--out", required=True)
     f.add_argument("--knn-k", type=int, default=15)
+    f.add_argument("--temperature", type=float, default=0.1, help="prototype softmax temperature")
     f.add_argument("--C", type=float, default=1.0)
     f.add_argument("--max-iter", type=int, default=2000)
-    f.add_argument("--seed", type=int, default=42)
+    f.add_argument("--seed", type=int, default=0)
     p = sub.add_parser("predict")
     p.add_argument("--embedding", required=True)
     p.add_argument("--model", required=True)

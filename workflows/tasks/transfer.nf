@@ -45,6 +45,8 @@ process transfer_fit {
 
     label 'cpu_task'
 
+    debug true   // surface the classifier's summary and warnings (e.g. k capped for a tiny reference)
+
     container "housy17/scllms:latest"
 
     publishDir "${params.transfer_results_dir}/transfer/models/${method}/${params.classifier}", mode: 'copy',
@@ -74,6 +76,8 @@ process transfer_predict {
     tag "${id}:${params.classifier}"
 
     label 'cpu_task'
+
+    debug true   // surface the classifier's summary and warnings (e.g. k capped for a tiny reference)
 
     container "housy17/scllms:latest"
 
