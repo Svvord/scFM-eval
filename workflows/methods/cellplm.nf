@@ -1,4 +1,5 @@
 params.model = "CellPLM/20231027_85M.best.ckpt"
+params.batch_size = 1024   // inference batch size used for the manuscript runs
 params.emb_results_dir = "results"
 
 process embed_by_cellplm {
@@ -42,6 +43,7 @@ process embed_by_cellplm {
     PRETRAIN_VERSION = os.path.basename("${params.model}").split('.')[0]
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    set_seed(42)
 
     adata = sc.read_h5ad("${raw_h5ad}")
     adata.var_names = adata.var['ensembl_id'].tolist()
@@ -52,8 +54,11 @@ process embed_by_cellplm {
         pretrain_prefix=PRETRAIN_VERSION,
         pretrain_directory=PRETRAIN_DIR
     )
-    embedding = pipeline.predict(adata, # An AnnData object
-                device=device)
+    embedding = pipeline.predict(
+        adata, # An AnnData object
+        inference_config={'batch_size': ${params.batch_size}},
+        device=device
+    )
     embedding = embedding.detach().cpu().numpy()
     var_names = [f'V{i+1}' for i in range(embedding.shape[1])]
     adata_embedding = anndata.AnnData(X=embedding, obs=adata.obs.copy(), var=pd.DataFrame(index=var_names))
@@ -112,6 +117,7 @@ process finetune_by_cellplm {
     PRETRAIN_VERSION = os.path.basename("${params.model}").split('.')[0]
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    set_seed(42)
 
     adata = sc.read_h5ad("${raw_h5ad}")
     adata.var_names = adata.var['ensembl_id'].tolist()
@@ -124,15 +130,21 @@ process finetune_by_cellplm {
     if not issparse(adata.X):
         adata.X = csr_matrix(adata.X)
     
-    train_idx, val_idx = train_test_split(
-        range(len(adata)),
-        test_size=${params.finetune_eval_size},
-        random_state=42,
-        stratify=labels_list,  # 按照 cell_type 分层
-    )
+    # Crash-safe stratified split: every class keeps >=1 training sample; a class too
+    # small to spare one for validation (floor(count*eval_size)==0) goes entirely to train.
+    def _min_train_split(_labels, _vf, _seed=42):
+        _labels = np.asarray(_labels); _rng = np.random.RandomState(_seed)
+        _tr, _va = [], []
+        for _c in np.unique(_labels):
+            _ix = np.where(_labels == _c)[0]; _rng.shuffle(_ix)
+            _nv = min(int(len(_ix) * _vf), len(_ix) - 1)
+            _va.extend(_ix[:_nv].tolist()); _tr.extend(_ix[_nv:].tolist())
+        _rng.shuffle(_tr); _rng.shuffle(_va)
+        return np.array(_tr, dtype=int), np.array(_va, dtype=int)
+    train_idx, val_idx = _min_train_split(labels_list, ${params.finetune_eval_size}, 42)
 
     adata.obs['split'] = 'train'
-    adata.obs['split'][val_idx] = 'valid'
+    adata.obs.iloc[val_idx, adata.obs.columns.get_loc('split')] = 'valid'
 
     pipeline_config = CellTypeAnnotationDefaultPipelineConfig.copy()
     pipeline_config['epochs'] = ${params.finetune_epoch}
@@ -319,6 +331,7 @@ process predict_by_cellplm {
         config = json.load(openfile)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    set_seed(42)
 
     pipeline_config = CellTypeAnnotationDefaultPipelineConfig.copy()
     pipeline = CellTypeAnnotationPipeline(

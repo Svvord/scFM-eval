@@ -1,8 +1,12 @@
-params.model = "scPRINT/v2-medium.ckpt"
+// Hugging Face jkobject/scPRINT `medium-v1.5.ckpt` pinned to the rename commit (see
+// workflows/utils/download.nf); it is byte-identical to the checkpoint originally released
+// as `v2-medium.ckpt`.
+params.model = "scPRINT/medium-v1.5.ckpt"
 params.batch_size = 64
 params.emb_results_dir = "results"
 params.how = "random expr"
 params.max_len = 4000
+params.scprint_save_every = 10000
 
 process preprocess_for_scprint {
 
@@ -60,9 +64,8 @@ process _embed_by_scprint {
     """
     source /.venv/bin/activate
     
-    if [ "\$HOME" != "/root" ]; then
-        cp -r /root/.lamin "\$HOME"/
-    fi
+    mkdir -p "\$HOME/.lamin"
+    cp -a "\${SCPRINT_LAMIN_SEED:-/opt/scprint/lamin}/.lamin/." "\$HOME/.lamin/"
     
     python - << 'EOF'
     import torch
@@ -73,6 +76,7 @@ process _embed_by_scprint {
     from scdataloader import Preprocessor, utils
     from scdataloader.utils import load_genes
     from scprint.tasks import GNInfer, Embedder, Denoiser, withknn
+    from scprint.model import utils as scprint_model_utils
     
     model_checkpoint_file = os.path.join("/data/model_weights", "${params.model}")
 
@@ -81,11 +85,15 @@ process _embed_by_scprint {
     m = torch.load(model_checkpoint_file, map_location=device)
     
 
-    transformer = "normal" if device=="cpu" else "flash"
+    transformer = "normal" if device.type == "cpu" else "flash"
 
     # both are for compatibility issues with different versions of the pretrained model, so we need to load it with the correct transformer
     if "prenorm" in m["hyper_parameters"]:
+        # `prenorm` is a legacy hyper-parameter that scPrint.__init__ no longer accepts
+        # (pre-norm is the fixed default). Drop it from a TASK-LOCAL copy of the
+        # checkpoint; never rewrite the shared file under /data/model_weights.
         m["hyper_parameters"].pop("prenorm")
+        model_checkpoint_file = os.path.abspath("scprint_checkpoint_local.ckpt")
         torch.save(m, model_checkpoint_file)
     if "label_counts" in m["hyper_parameters"]:
         # you need to set precpt_gene_emb=None otherwise the model will look for its precomputed gene embeddings files although they were already converted into model weights, so you don't need this file for a pretrained model
@@ -118,14 +126,93 @@ process _embed_by_scprint {
         model._rm_genes(missing)
 
     # again if not on GPU you need to convert the model to float64
-    if device=="cpu":
+    if device.type == "cpu":
         model = model.to(torch.float32)
 
     # you can perform your inference on float16 if you have a GPU, otherwise use float64
-    dtype = torch.float16 if device != "cpu" else torch.float32
+    dtype = torch.float16 if device.type != "cpu" else torch.float32
 
     # the models are often loaded with some parts still displayed as "cuda" and some as "cpu", so we need to make sure that the model is fully on the right device
     model = model.to(device)
+
+    def make_embedding_only_adata(
+        pos,
+        expr_pred,
+        genes,
+        embs,
+        classes,
+        pred=None,
+        attention=None,
+        label_decoders=None,
+        labels_hierarchy={},
+        gtclass=None,
+        doplot=True,
+    ):
+        # Keep only outputs needed by this workflow; skip dense expression layers.
+        import numpy as np
+        import pandas as pd
+        from anndata import AnnData
+
+        if embs is None:
+            return AnnData(X=np.empty((0, 0), dtype=np.float32)), None
+
+        emb_array = embs.detach().to(device="cpu", dtype=torch.float32).numpy()
+        obs = pd.DataFrame(index=range(emb_array.shape[0]))
+
+        if pred is not None and len(classes) > 0:
+            pred_array = pred.detach().to(device="cpu", dtype=torch.int32).numpy()
+            if pred_array.ndim == 1:
+                pred_array = pred_array.reshape(-1, 1)
+            columns = ["pred_" + cls for cls in classes]
+            if label_decoders is not None:
+                pred_array = np.array(
+                    [
+                        [
+                            label_decoders[classes[col_idx]][int(value)]
+                            for value in pred_array[:, col_idx]
+                        ]
+                        for col_idx in range(pred_array.shape[1])
+                    ]
+                ).T
+            obs = pd.DataFrame(pred_array, columns=columns)
+
+        adata = AnnData(X=emb_array, obs=obs)
+        adata.obsm["scprint_emb"] = emb_array
+        return adata, None
+
+    scprint_model_utils.make_adata = make_embedding_only_adata
+
+    import anndata as ad
+    import importlib
+
+    original_anndata_concat = ad.concat
+
+    def concat_without_empty_scprint_shards(adatas, *args, **kwargs):
+        if isinstance(adatas, dict):
+            filtered = {
+                key: value
+                for key, value in adatas.items()
+                if not (hasattr(value, "n_obs") and value.n_obs == 0)
+            }
+            if filtered and len(filtered) != len(adatas):
+                print(f"Skipping {len(adatas) - len(filtered)} empty scPRINT prediction shard(s).")
+                adatas = filtered
+        elif isinstance(adatas, (list, tuple)):
+            filtered = [
+                value
+                for value in adatas
+                if not (hasattr(value, "n_obs") and value.n_obs == 0)
+            ]
+            if filtered and len(filtered) != len(adatas):
+                print(f"Skipping {len(adatas) - len(filtered)} empty scPRINT prediction shard(s).")
+                adatas = tuple(filtered) if isinstance(adatas, tuple) else filtered
+        return original_anndata_concat(adatas, *args, **kwargs)
+
+    ad.concat = concat_without_empty_scprint_shards
+    for module_name in ("scprint.model.model", "scprint.tasks.cell_emb"):
+        module = importlib.import_module(module_name)
+        if getattr(module, "concat", None) is original_anndata_concat:
+            module.concat = concat_without_empty_scprint_shards
 
     embedder = Embedder(
         # can work on random genes or most variables etc..
@@ -138,13 +225,16 @@ process _embed_by_scprint {
         num_workers=8,
         # we will only use the cell type embedding here.
         pred_embedding=["cell_type_ontology_term_id"],
-        save_every=40_000,
+        save_every=${params.scprint_save_every},
         dtype=dtype,
         doplot=False
     )
 
     import scanpy as sc
     import pandas as pd
+    if getattr(sc, "concat", None) is original_anndata_concat:
+        sc.concat = concat_without_empty_scprint_shards
+
     adata = sc.read_h5ad("${processed_h5ad}")
     # obs_names = adata.obs_names.tolist()
 
@@ -176,7 +266,7 @@ process postprocess_for_scprint {
     
     container "housy17/scprint:latest"
 
-    publishDir "${params.emb_results_dir}}/embeddings/scprint", mode: 'copy',
+    publishDir "${params.emb_results_dir}/embeddings/scprint", mode: 'copy',
                saveAs: { filename -> "${id}.h5ad" }, enabled: params.emb_results_dir as boolean
 
     input:
@@ -284,9 +374,8 @@ process _finetune_by_scprint {
     """
     source /.venv/bin/activate
 
-    if [ "\$HOME" != "/root" ]; then
-        cp -r /root/.lamin "\$HOME"/
-    fi
+    mkdir -p "\$HOME/.lamin"
+    cp -a "\${SCPRINT_LAMIN_SEED:-/opt/scprint/lamin}/.lamin/." "\$HOME/.lamin/"
 
     python - << 'EOF'
     import os
@@ -331,12 +420,18 @@ process _finetune_by_scprint {
     adataset = SimpleAnnDataset(adata, obs_to_output=["organism_ontology_term_id", "cell_type"])
     labels_list = [adataset[i]['cell_type'] for i in range(len(adataset))]
 
-    train_idx, val_idx = train_test_split(
-        range(len(adataset)),
-        test_size=${params.finetune_eval_size},
-        random_state=42,
-        stratify=labels_list,  # 按照 cell_type 分层
-    )
+    # Crash-safe stratified split: every class keeps >=1 training sample; a class too
+    # small to spare one for validation (floor(count*eval_size)==0) goes entirely to train.
+    def _min_train_split(_labels, _vf, _seed=42):
+        _labels = np.asarray(_labels); _rng = np.random.RandomState(_seed)
+        _tr, _va = [], []
+        for _c in np.unique(_labels):
+            _ix = np.where(_labels == _c)[0]; _rng.shuffle(_ix)
+            _nv = min(int(len(_ix) * _vf), len(_ix) - 1)
+            _va.extend(_ix[:_nv].tolist()); _tr.extend(_ix[_nv:].tolist())
+        _rng.shuffle(_tr); _rng.shuffle(_va)
+        return np.array(_tr, dtype=int), np.array(_va, dtype=int)
+    train_idx, val_idx = _min_train_split(labels_list, ${params.finetune_eval_size}, 42)
 
     train_dataset = Subset(adataset, train_idx)
     val_dataset = Subset(adataset, val_idx)
@@ -347,10 +442,14 @@ process _finetune_by_scprint {
     model_checkpoint_file = os.path.join("/data/model_weights", "${params.model}")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     m = torch.load(model_checkpoint_file, map_location=device)
-    transformer = "normal" if device=="cpu" else "flash"
+    transformer = "normal" if device.type == "cpu" else "flash"
 
     if "prenorm" in m["hyper_parameters"]:
+        # `prenorm` is a legacy hyper-parameter that scPrint.__init__ no longer accepts
+        # (pre-norm is the fixed default). Drop it from a TASK-LOCAL copy of the
+        # checkpoint; never rewrite the shared file under /data/model_weights.
         m["hyper_parameters"].pop("prenorm")
+        model_checkpoint_file = os.path.abspath("scprint_checkpoint_local.ckpt")
         torch.save(m, model_checkpoint_file)
 
     if "label_counts" in m["hyper_parameters"]:
@@ -375,11 +474,11 @@ process _finetune_by_scprint {
         model._rm_genes(missing)
 
     # again if not on GPU you need to convert the model to float64
-    if device=="cpu":
+    if device.type == "cpu":
         model = model.to(torch.float32)
 
     # you can perform your inference on float16 if you have a GPU, otherwise use float64
-    dtype = torch.float16 if device != "cpu" else torch.float32
+    dtype = torch.float16 if device.type != "cpu" else torch.float32
     
     # the models are often loaded with some parts still displayed as "cuda" and some as "cpu", so we need to make sure that the model is fully on the right device
     model = model.to(device)
@@ -599,9 +698,8 @@ process _predict_by_scprint {
     """
     source /.venv/bin/activate
 
-    if [ "\$HOME" != "/root" ]; then
-        cp -r /root/.lamin "\$HOME"/
-    fi
+    mkdir -p "\$HOME/.lamin"
+    cp -a "\${SCPRINT_LAMIN_SEED:-/opt/scprint/lamin}/.lamin/." "\$HOME/.lamin/"
 
     python - << 'EOF'
     #!/usr/bin/env python
@@ -654,9 +752,9 @@ process _predict_by_scprint {
     model.eval()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    if device=="cpu":
+    if device.type == "cpu":
         model = model.to(torch.float32)
-    dtype = torch.float16 if device != "cpu" else torch.float32
+    dtype = torch.float16 if device.type != "cpu" else torch.float32
     model = model.to(device)
 
     # =========== data loader ============= #

@@ -72,7 +72,7 @@ def main():
         length_column_name="length",
         disable_tqdm=False,
         lr_scheduler_type="linear",
-        warmup_steps=500,
+        warmup_ratio=0.1,   # was warmup_steps=500 (absolute); ratio scales to actual step count
         weight_decay=0.001,
         num_train_epochs=args.epochs,
         save_strategy="epoch",
@@ -103,14 +103,31 @@ def main():
         return example
     dataset = dataset.map(encode)
     
-    # Train-test split
-    train_idx, test_idx = train_test_split(
-        range(len(dataset)),
-        test_size=args.eval_size,
-        stratify=dataset['cell_type']
-    )
+    # Train-test split (crash-safe stratified: every class keeps >=1 training sample;
+    # a class too small to spare one for validation goes entirely to train).
+    def _min_train_split(_labels, _vf, _seed=42):
+        _labels = np.asarray(_labels); _rng = np.random.RandomState(_seed)
+        _tr, _va = [], []
+        for _c in np.unique(_labels):
+            _ix = np.where(_labels == _c)[0]; _rng.shuffle(_ix)
+            _nv = min(int(len(_ix) * _vf), len(_ix) - 1)
+            _va.extend(_ix[:_nv].tolist()); _tr.extend(_ix[_nv:].tolist())
+        _rng.shuffle(_tr); _rng.shuffle(_va)
+        return np.array(_tr, dtype=int), np.array(_va, dtype=int)
+    train_idx, test_idx = _min_train_split(list(dataset['cell_type']), args.eval_size, 42)
     train_dataset = dataset.select(train_idx)
     eval_dataset = dataset.select(test_idx)
+
+    # Floor total training at >=1000 gradient steps: small references would otherwise get
+    # too few updates and a warmup_ratio window that is a large fraction of training.
+    # Stay epoch-native (scCello's regime) -- bump the epoch count only when the official
+    # 20 epochs would fall short of 1000 steps; large references keep their 20 epochs.
+    import math as _math
+    _steps_per_epoch = max(1, _math.ceil(len(train_dataset) / args.batch_size))
+    if _steps_per_epoch * training_args.num_train_epochs < 1000:
+        training_args.num_train_epochs = float(_math.ceil(1000 / _steps_per_epoch))
+    print(f"[sccello] n_train={len(train_dataset)} steps/epoch={_steps_per_epoch} "
+          f"-> epochs={training_args.num_train_epochs} (~{int(_steps_per_epoch*training_args.num_train_epochs)} steps)")
 
     # Load model
     model_kwargs = {

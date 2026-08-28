@@ -1,5 +1,6 @@
 params.model = "scFoundation/models.ckpt"
 params.emb_results_dir = "results"
+params.scfoundation_pool_type = "all"
 
 process preprocess_for_scfoundation {
 
@@ -65,7 +66,7 @@ process _embed_by_scfoundation {
     python /code/scfoundation/get_embedding.py \\
     --input_type singlecell \\
     --output_type cell \\
-    --pool_type max \\
+    --pool_type ${params.scfoundation_pool_type} \\
     --tgthighres t4 \\
     --data_path ${processed_h5ad} \\
     --save_path "./" \\
@@ -132,6 +133,10 @@ params.finetune_eval_size    = 0.2
 params.finetune_batch_size   = 32
 params.predict_batch_size    = 64
 params.finetune_results_dir  = ""
+// training-strategy knobs (A/B): original = lr 5e-5 + scheduler 'none'
+params.scfoundation_lr        = 1e-4
+params.scfoundation_scheduler = "warmup_cosine"
+params.scfoundation_grad_clip = 0.0
 
 process _finetune_by_scfoundation {
 
@@ -158,7 +163,10 @@ process _finetune_by_scfoundation {
     --epochs ${params.finetune_epoch} \\
     --batch_size ${params.finetune_batch_size} \\
     --val_size ${params.finetune_eval_size} \\
-    --label_key ${params.finetune_label_key}
+    --label_key ${params.finetune_label_key} \\
+    --lr ${params.scfoundation_lr} \\
+    --scheduler ${params.scfoundation_scheduler} \\
+    --grad_clip ${params.scfoundation_grad_clip}
     """
 }
 

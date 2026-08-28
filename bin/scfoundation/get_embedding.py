@@ -212,7 +212,13 @@ def main():
                     geneembmerge, _ = torch.max(geneemb, dim=1)
                 else:
                     raise ValueError('pool_type must be all or max')
-                geneexpemb.append(geneembmerge.detach().cpu().numpy())
+                geneembmerge = geneembmerge.detach().cpu().numpy()
+                if isinstance(geneexpemb, list):
+                    geneexpemb = np.empty(
+                        (gexpr_feature.shape[0], geneembmerge.shape[1]),
+                        dtype=geneembmerge.dtype,
+                    )
+                geneexpemb[i] = geneembmerge[0]
 
             #Gene embedding
             elif args.output_type=='gene':
@@ -265,7 +271,8 @@ def main():
                 geneexpemb.append(out.detach().cpu().numpy())                
             else:
                 raise ValueError('output_type must be cell or gene or gene_batch or gene_expression')
-    geneexpemb = np.squeeze(np.array(geneexpemb))
+    if isinstance(geneexpemb, list):
+        geneexpemb = np.squeeze(np.array(geneexpemb))
     print(geneexpemb.shape)
     np.save(strname,geneexpemb)
 

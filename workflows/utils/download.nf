@@ -1,3 +1,13 @@
+/*
+ * Checkpoint download processes.
+ *
+ * Every process runs inside the housy17/scfm_download container and writes to
+ * /data/model_weights, which nextflow.config bind-mounts from params.model_weights_dir
+ * (default: <repo>/data/model_weights). Using the mount point rather than the host
+ * path keeps this working under Docker as well as Apptainer/Singularity, and lets
+ * `--weights-dir` redirect the downloads.
+ */
+
 process download_scgpt_checkpoints {
 
     container "housy17/scfm_download:latest"
@@ -7,7 +17,7 @@ process download_scgpt_checkpoints {
 
     script:
     """
-    cd "${projectDir}/data/model_weights"
+    cd /data/model_weights
     mkdir -p scGPT
     cd scGPT
     gdown --folder https://drive.google.com/drive/folders/1oWh_-ZRdhtoGQ2Fw24HP41FgLoomVo-y?usp=drive_link
@@ -24,7 +34,7 @@ process download_cellama_checkpoints {
 
     script:
     """
-    cd "${projectDir}/data/model_weights"
+    cd /data/model_weights
     mkdir -p CELLama
     cd CELLama
     python - << 'EOF'
@@ -51,7 +61,7 @@ process download_cellfm_checkpoints {
 
     script:
     """
-    cd "${projectDir}/data/model_weights"
+    cd /data/model_weights
     mkdir -p CellFM
     cd CellFM
     hf download ShangguanNingyuan/CellFM "CellFM_80M_weight.ckpt" --local-dir ./
@@ -70,7 +80,7 @@ process download_cellplm_checkpoints {
     script:
     """
     set -euo pipefail
-    cd "${projectDir}/data/model_weights"
+    cd /data/model_weights
     mkdir -p CellPLM
     cd CellPLM
     # Official CellPLM checkpoints are distributed only through the authors' Dropbox
@@ -104,7 +114,7 @@ process download_geneformer_checkpoints {
 
     script:
     """
-    cd "${projectDir}/data/model_weights"
+    cd /data/model_weights
     mkdir -p Geneformer
     cd Geneformer
     hf download ctheodoris/Geneformer "Geneformer-V2-316M/config.json" --local-dir ./
@@ -125,7 +135,7 @@ process download_genept_checkpoints {
 
     script:
     """
-    cd "${projectDir}/data/model_weights"
+    cd /data/model_weights
     mkdir -p GenePT
     cd GenePT
     curl -L -o GenePT_emebdding_v2.zip "https://zenodo.org/records/10833191/files/GenePT_emebdding_v2.zip?download=1"
@@ -148,7 +158,7 @@ process download_langcell_checkpoints {
 
     script:
     """
-    cd "${projectDir}/data/model_weights"
+    cd /data/model_weights
     mkdir -p LangCell
     cd LangCell
     gdown --remaining-ok --folder https://drive.google.com/drive/folders/1Su6PtuFahlVMWEgD1i-wahx4Gu3a0oCR?usp=drive_link
@@ -166,7 +176,7 @@ process download_scbert_checkpoints {
 
     script:
     """
-    cd "${projectDir}/data/model_weights"
+    cd /data/model_weights
     mkdir -p scBERT
     cd scBERT
     gdown https://drive.google.com/uc?id=1_Pgk_o8AtQtoXr_ZLQx0eJYoSWzjxC8f
@@ -184,7 +194,7 @@ process download_sccello_checkpoints {
 
     script:
     """
-    cd "${projectDir}/data/model_weights"
+    cd /data/model_weights
     mkdir -p scCello
     cd scCello
     python - << 'EOF'
@@ -210,7 +220,7 @@ process download_scfoundation_checkpoints {
 
     script:
     """
-    cd "${projectDir}/data/model_weights"
+    cd /data/model_weights
     mkdir -p scFoundation
     cd scFoundation
     hf download genbio-ai/scFoundation "models.ckpt" --local-dir ./
@@ -228,7 +238,7 @@ process download_scimilarity_checkpoints {
 
     script:
     """
-    cd "${projectDir}/data/model_weights"
+    cd /data/model_weights
     mkdir -p SCimilarity
     cd SCimilarity
     curl -L -o model_v1.1.tar.gz https://zenodo.org/records/10685499/files/model_v1.1.tar.gz?download=1
@@ -249,7 +259,7 @@ process download_scprint_checkpoints {
     script:
     """
     set -euo pipefail
-    cd "${projectDir}/data/model_weights"
+    cd /data/model_weights
     mkdir -p scPRINT
     cd scPRINT
     # Checkpoint naming history (upstream change, not ours): the checkpoint benchmarked
@@ -283,7 +293,7 @@ process download_uce_checkpoints {
 
     script:
     """
-    cd "${projectDir}/data/model_weights"
+    cd /data/model_weights
     mkdir -p UCE
     cd UCE
     curl -L https://ndownloader.figshare.com/files/43423236 -o 33l_8ep_1024t_1280.torch
@@ -307,7 +317,7 @@ process download_c2s_checkpoints {
 
     script:
     """
-    cd "${projectDir}/data/model_weights"
+    cd /data/model_weights
     mkdir -p C2S
     cd C2S
     hf download vandijklab/C2S-Pythia-410m-cell-type-prediction --local-dir ./C2S-Pythia-410m-cell-type-prediction
@@ -325,7 +335,7 @@ process download_scvi_checkpoints {
     script:
     """
     set -euo pipefail
-    cd "${projectDir}/data/model_weights"
+    cd /data/model_weights
     mkdir -p scVI/Census2024-07-01-HomoSapiens
     cd scVI/Census2024-07-01-HomoSapiens
     if [ -s model.pt ]; then
@@ -360,7 +370,7 @@ process download_novae_checkpoints {
 
     """
     set -euo pipefail
-    cd "${projectDir}/data/model_weights"
+    cd /data/model_weights
     mkdir -p "${model_path}"
     hf download ${repo_id} \\
         --local-dir "./${model_path}"

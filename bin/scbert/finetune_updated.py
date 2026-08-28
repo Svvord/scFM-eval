@@ -144,8 +144,18 @@ f1w = []
 skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=SEED)
 pred_list = pd.Series(['un'] * data.shape[0])
 
-sss = StratifiedShuffleSplit(n_splits=1, test_size=args.eval_size, random_state=SEED)
-for index_train, index_val in sss.split(data, label):
+# Crash-safe stratified split: every class keeps >=1 training sample; a class too
+# small to spare one for validation (floor(count*eval_size)==0) goes entirely to train.
+def _min_train_split(_labels, _vf, _seed=42):
+    _labels = np.asarray(_labels); _rng = np.random.RandomState(_seed)
+    _tr, _va = [], []
+    for _c in np.unique(_labels):
+        _ix = np.where(_labels == _c)[0]; _rng.shuffle(_ix)
+        _nv = min(int(len(_ix) * _vf), len(_ix) - 1)
+        _va.extend(_ix[:_nv].tolist()); _tr.extend(_ix[_nv:].tolist())
+    _rng.shuffle(_tr); _rng.shuffle(_va)
+    return np.array(_tr, dtype=int), np.array(_va, dtype=int)
+for index_train, index_val in [_min_train_split(label, args.eval_size, SEED)]:
     data_train, label_train = data[index_train], label[index_train]
     data_val, label_val = data[index_val], label[index_val]
     train_dataset = SCDataset(data_train, label_train)

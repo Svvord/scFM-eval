@@ -1,0 +1,19 @@
+{
+  "c2s":          {"name": "C2S", "container": "housy17/c2s:latest", "gpu": true, "tasks": ["download", "embed", "fewshot"], "notes": "Cell2Sentence v1.2.0; fine-tuning not yet supported"},
+  "cellama":      {"name": "CELLama", "container": "housy17/cellama:latest", "gpu": true, "tasks": ["download", "embed", "fewshot", "finetune"], "notes": ""},
+  "cellfm":       {"name": "CellFM", "container": "housy17/cellfm:latest", "gpu": true, "tasks": ["download", "embed", "fewshot", "finetune"], "notes": ""},
+  "cellplm":      {"name": "CellPLM", "container": "housy17/cellplm:latest", "gpu": true, "tasks": ["download", "embed", "fewshot", "finetune"], "notes": ""},
+  "geneformer":   {"name": "Geneformer", "container": "housy17/geneformer:latest", "gpu": true, "tasks": ["download", "embed", "fewshot", "finetune"], "notes": ""},
+  "genept":       {"name": "GenePT-w", "container": "housy17/genept:latest", "gpu": false, "tasks": ["download", "embed", "fewshot", "finetune"], "notes": ""},
+  "langcell":     {"name": "LangCell", "container": "housy17/langcell:latest", "gpu": true, "tasks": ["download", "embed", "fewshot", "finetune"], "notes": ""},
+  "scbert":       {"name": "scBERT", "container": "housy17/scbert:latest", "gpu": true, "tasks": ["download", "embed", "fewshot", "finetune"], "notes": ""},
+  "sccello":      {"name": "scCello", "container": "housy17/sccello:latest", "gpu": true, "tasks": ["download", "embed", "fewshot", "finetune"], "notes": ""},
+  "scfoundation": {"name": "scFoundation", "container": "housy17/scfoundation:latest", "gpu": true, "tasks": ["download", "embed", "fewshot", "finetune"], "notes": ""},
+  "scgpt":        {"name": "scGPT", "container": "housy17/scgpt:0.2.4", "gpu": true, "tasks": ["download", "embed", "fewshot", "finetune"], "notes": ""},
+  "scimilarity":  {"name": "SCimilarity", "container": "housy17/scimilarity:latest", "gpu": true, "tasks": ["download", "embed", "fewshot", "finetune"], "notes": ""},
+  "scprint":      {"name": "scPRINT", "container": "housy17/scprint:latest", "gpu": true, "tasks": ["download", "embed", "fewshot", "finetune"], "notes": ""},
+  "uce":          {"name": "UCE", "container": "housy17/uce:latest", "gpu": true, "tasks": ["download", "embed", "fewshot", "finetune"], "notes": ""},
+  "scvi":         {"name": "scVI", "container": "scverse/scvi-tools:py3.11-cu12-runtime-stable", "gpu": true, "tasks": ["download", "embed"], "notes": "CELLxGENE Census 2024-07-01 pretrained model; zero-shot query projection"},
+  "novae":        {"name": "Novae", "container": "housy17/novae:1.0.0", "gpu": true, "tasks": ["download", "embed"], "notes": "spatial model; input must carry obsm['spatial']"},
+  "pca":          {"name": "PCA", "container": "housy17/scllms:latest", "gpu": false, "tasks": ["embed"], "notes": "expression-based reference: normalize/log1p/HVG(2000)/scale/PCA(50)"}
+}

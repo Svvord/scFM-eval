@@ -62,11 +62,10 @@ process _embed_by_langcell {
     import os
     from datasets import load_from_disk
     import torch.nn as nn, torch.nn.functional as F
-    import torch, json
-    from transformers import BertTokenizer, BertModel
+    import torch
+    from transformers import BertModel
     import sys
     sys.path.append(os.path.join("/code", "langcell","LangCell-annotation-zeroshot"))
-    from utils import BertModel as MedBertModel
     from utils import LangCellDataCollatorForCellClassification as DataCollatorForCellClassification
     from tqdm import tqdm
     from torch.utils.data import DataLoader
@@ -90,23 +89,10 @@ process _embed_by_langcell {
     MODEL_WEIGHTS_DIR = os.path.join('/data/model_weights', 'LangCell/ckpt')
     CELL_BERT_DIR = os.path.join(MODEL_WEIGHTS_DIR, 'cell_bert')
     CELL_PROJ_FILE = os.path.join(MODEL_WEIGHTS_DIR, 'cell_proj.bin')
-    TEXT_BERT_DIR = os.path.join(MODEL_WEIGHTS_DIR, 'text_bert')
-    TEXT_PROJ_FILE = os.path.join(MODEL_WEIGHTS_DIR, 'text_proj.bin')
-    CMD_HEAD_FILE = os.path.join(MODEL_WEIGHTS_DIR, 'ctm_head.bin')
 
     model = BertModel.from_pretrained(CELL_BERT_DIR)
     model.pooler = Pooler(model.config, pretrained_proj=CELL_PROJ_FILE, proj_dim=256)
-    proj = model.pooler.proj
     model = model.to(device)
-
-    text_encoder = MedBertModel.from_pretrained(TEXT_BERT_DIR, add_pooling_layer=True)
-    text_encoder.pooler = Pooler(text_encoder.config, pretrained_proj=TEXT_PROJ_FILE, proj_dim=256)
-    text_encoder = text_encoder.to(device)
-
-
-    ctm_head = nn.Linear(text_encoder.config.hidden_size, 2)
-    ctm_head.load_state_dict(torch.load(CMD_HEAD_FILE))
-    ctm_head = ctm_head.to(device)
 
     def cell_encode(cell_input_ids, cell_atts):
         cell = model(cell_input_ids.to(device), cell_atts.to(device))
@@ -127,7 +113,6 @@ process _embed_by_langcell {
 
     embedding = torch.zeros(len(dataset), 256)
     model.eval()
-    text_encoder.eval()
     with torch.no_grad():
         for i, d in tqdm(enumerate(dataloader)):
             cell_last_h, cellemb = cell_encode(d['input_ids'], d['attention_mask']) # batchsize * 256
@@ -167,10 +152,27 @@ process postprocess_for_langcell {
     obs = ori_adata.obs.copy()  # 提取 obs DataFrame
     
     adata_embedding = ad.read_h5ad("${embedding}")
-    obs = obs.loc[adata_embedding.obs_names]
+    query_names = adata_embedding.obs_names.astype(str)
+    obs["_scfm_row_position"] = range(obs.shape[0])
+    if "barcode" in obs.columns:
+        obs_by_barcode = obs.copy()
+        obs_by_barcode.index = obs_by_barcode["barcode"].astype(str)
+        if obs_by_barcode.index.duplicated().any():
+            raise ValueError("Duplicate values found in obs['barcode']; cannot align LangCell embeddings safely.")
+        missing = query_names.difference(obs_by_barcode.index)
+        if len(missing) > 0:
+            raise KeyError(f"Unable to align {len(missing)} LangCell barcodes to raw h5ad obs['barcode'].")
+        obs = obs_by_barcode.loc[query_names].copy()
+    else:
+        obs.index = obs.index.astype(str)
+        missing = query_names.difference(obs.index)
+        if len(missing) > 0:
+            raise KeyError(f"Unable to align {len(missing)} LangCell obs names to raw h5ad obs_names.")
+        obs = obs.loc[query_names].copy()
+    row_positions = obs.pop("_scfm_row_position").to_numpy()
     adata_embedding.obs = obs
     if 'spatial' in ori_adata.obsm:
-        adata_embedding.obsm['spatial'] = ori_adata[adata_embedding.obs_names].obsm['spatial']
+        adata_embedding.obsm['spatial'] = ori_adata.obsm['spatial'][row_positions]
     adata_embedding.write("langcell_embeddings.h5ad")
     """
 }
@@ -189,8 +191,8 @@ workflow embed_by_langcell {
 }
 
 
-params.finetune_batch_size = 4
-params.finetune_epoch = 4
+params.finetune_batch_size = 16   // official LangCell annotation batch size
+params.finetune_epoch = 20   // official LangCell annotation epochs
 params.finetune_eval_size = 0.33
 params.predict_batch_size = 16
 params.finetune_results_dir  = ""
@@ -288,14 +290,23 @@ process _finetune_by_langcell {
     labeled_trainset = trainset_organ_shuffled.map(classes_to_ids, num_proc=16)
 
     test_size = ${params.finetune_eval_size}
-    train_size = round(len(labeled_trainset)*(1-test_size))
-    labeled_train_split = labeled_trainset.select([i for i in range(0, train_size)])
-    labeled_eval_split = labeled_trainset.select([i for i in range(train_size, len(labeled_trainset))])
-    trained_labels = list(Counter(labeled_train_split["label"]).keys())
-
-    def if_trained_label(example):
-        return example["label"] in trained_labels
-    labeled_eval_split_subset = labeled_eval_split.filter(if_trained_label, num_proc=16)
+    import numpy as np
+    # Crash-safe stratified split (replaces the order-based split): every class keeps
+    # >=1 training sample; a class too small to spare one for validation goes entirely
+    # to train (benchmark fairness). Stratification also guarantees val labels are a
+    # subset of train labels, so the old trained-label eval filter is no longer needed.
+    def _min_train_split(_labels, _vf, _seed=42):
+        _labels = np.asarray(_labels); _rng = np.random.RandomState(_seed)
+        _tr, _va = [], []
+        for _c in np.unique(_labels):
+            _ix = np.where(_labels == _c)[0]; _rng.shuffle(_ix)
+            _nv = min(int(len(_ix) * _vf), len(_ix) - 1)
+            _va.extend(_ix[:_nv].tolist()); _tr.extend(_ix[_nv:].tolist())
+        _rng.shuffle(_tr); _rng.shuffle(_va)
+        return np.array(_tr, dtype=int), np.array(_va, dtype=int)
+    _tr_idx, _va_idx = _min_train_split(labeled_trainset["label"], test_size, 1)
+    labeled_train_split = labeled_trainset.select(_tr_idx.tolist())
+    labeled_eval_split_subset = labeled_trainset.select(_va_idx.tolist())
 
     train_set = labeled_train_split
     eval_set = labeled_eval_split_subset
@@ -325,7 +336,13 @@ process _finetune_by_langcell {
 
     import math
     epoch_step = math.ceil(len(organ_trainset)/batch_size)
-    strategy = "steps" if epoch_step > 500 else "epoch"
+    # Floor total training at >=1000 gradient steps (small references would otherwise get
+    # too few updates and a warmup_ratio window that dominates). Stay epoch-native: bump
+    # the epoch count only when the official 20 epochs falls short; large refs keep 20.
+    if epoch_step * epochs < 1000:
+        epochs = math.ceil(1000 / epoch_step)
+    strategy = "epoch"   # eval/save once per epoch -> num_train_epochs eval points for best-model
+    print(f"[langcell] n_train={len(organ_trainset)} steps/epoch={epoch_step} -> epochs={epochs} (~{epoch_step*epochs} steps)")
     
     training_args = {
         "learning_rate": 5e-5,
@@ -343,7 +360,7 @@ process _finetune_by_langcell {
         "length_column_name": "length",
         "disable_tqdm": False,
         "lr_scheduler_type": lr_schedule_fn,
-        "warmup_steps": warmup_steps,
+        "warmup_ratio": 0.1,   # was warmup_steps=500 (absolute); ratio scales to actual steps
         "weight_decay": 0.001,
         "per_device_train_batch_size": batch_size,
         "per_device_eval_batch_size": batch_size * 2,

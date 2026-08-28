@@ -1,4 +1,6 @@
 params.model = "SCimilarity/model_v1.1"
+params.batch_size = 2048
+params.scimilarity_use_gpu = true
 params.emb_results_dir = "results"
 
 process preprocess_for_scimilarity {
@@ -19,7 +21,10 @@ process preprocess_for_scimilarity {
     import scanpy as sc
     import numpy as np
     import pandas as pd
+    import anndata
+    import warnings
     from scipy.sparse import csr_matrix
+    from scimilarity import CellAnnotation
 
     adata = sc.read_h5ad("${raw_h5ad}")
 
@@ -32,6 +37,34 @@ process preprocess_for_scimilarity {
         else:
             adata.layers["counts"] = adata.X.copy()
     adata.X = csr_matrix(adata.layers["counts"].shape)
+
+    model_path = "/data/model_weights/${params.model}"
+    ca = CellAnnotation(model_path=model_path)
+    reference_genes = list(ca.gene_order)
+    reference_gene_set = set(reference_genes)
+    adata_gene_set = set(adata.var_names)
+    gene_overlap = len(reference_gene_set & adata_gene_set)
+
+    if gene_overlap < 5000:
+        adata_copy = adata.copy()
+        n_cells = adata.n_obs
+        missing_genes = sorted(reference_gene_set - adata_gene_set)
+        warnings.warn(
+            f"SCimilarity gene overlap is {gene_overlap} (<5000) for ${id}; "
+            f"applying fallback by padding {len(missing_genes)} missing reference genes with zero counts.",
+            RuntimeWarning,
+        )
+        X_missing = csr_matrix((n_cells, len(missing_genes)))
+        missing_adata = anndata.AnnData(
+            X=X_missing,
+            obs=adata.obs.copy(),
+            var=pd.DataFrame(index=missing_genes),
+        )
+        missing_adata.layers["counts"] = X_missing.copy()
+        adata = anndata.concat([adata_copy, missing_adata], axis=1)
+        adata.obs = adata_copy.obs
+        adata.obsm = adata_copy.obsm
+
     adata.write_h5ad("temp_scimilarity.h5ad")
     """
 }
@@ -40,7 +73,7 @@ process _embed_by_scimilarity {
 
     tag "${id}"
 
-    label "cpu_task"  // scimilarity 不使用 GPU
+    label 'gpu_task'
 
     container "housy17/scimilarity:latest"
 
@@ -58,17 +91,18 @@ process _embed_by_scimilarity {
     #!/usr/bin/env python3
     import scanpy as sc
     from scimilarity.utils import lognorm_counts, align_dataset
-    from scimilarity import CellQuery
+    from scimilarity import CellEmbedding
     from pathlib import Path
     import os
     model_path = "/data/model_weights/${params.model}"
-    cq = CellQuery(model_path)
+    use_gpu = "${params.scimilarity_use_gpu}".strip().lower() in {"1", "true", "yes", "y"}
+    ce = CellEmbedding(model_path, use_gpu=use_gpu)
 
     adams = sc.read("${raw_h5ad}")
-    adams = align_dataset(adams, cq.gene_order)
+    adams = align_dataset(adams, ce.gene_order)
     adams = lognorm_counts(adams)
 
-    embeddings = cq.get_embeddings(adams.X)
+    embeddings = ce.get_embeddings(adams.X, buffer_size=${params.batch_size})
 
     var_names = [f'V{i+1}' for i in range(embeddings.shape[1])]
     import pandas as pd

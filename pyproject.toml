@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "scfoundry"
+dynamic = ["version"]
+description = "Deploy, run and evaluate single-cell foundation models with one command (Nextflow-based)"
+readme = "README.md"
+requires-python = ">=3.7"
+authors = [{ name = "Siyu Hou" }]
+keywords = ["single-cell", "foundation-model", "benchmark", "nextflow", "scRNA-seq"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX :: Linux",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = []   # standard library only; Nextflow and a container runtime are external requirements
+
+[project.urls]
+Homepage = "https://github.com/Svvord/scFM-eval"
+Repository = "https://github.com/Svvord/scFM-eval"
+
+[project.scripts]
+scfoundry = "scfoundry.cli:main"
+
+[tool.hatch.version]
+path = "scfoundry/__init__.py"
+
+# The wheel carries the Nextflow pipeline inside the package (scfoundry/pipeline/),
+# while the repository keeps the developer-friendly layout with main.nf at the root.
+[tool.hatch.build.targets.wheel]
+packages = ["scfoundry"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"main.nf"                 = "scfoundry/pipeline/main.nf"
+"nextflow.example.config" = "scfoundry/pipeline/nextflow.example.config"
+"workflows"               = "scfoundry/pipeline/workflows"
+"bin"                     = "scfoundry/pipeline/bin"
+"conf"                    = "scfoundry/pipeline/conf"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "scfoundry/", "main.nf", "nextflow.example.config", "workflows/", "bin/", "conf/",
+    "README.md", "pyproject.toml", "tests/",
+]
+
+[tool.hatch.build]
+exclude = ["**/__pycache__", "**/*.pyc", "**/.DS_Store", "**/*.ipynb_checkpoints"]

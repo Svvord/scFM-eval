@@ -25,7 +25,6 @@ process embed_by_scgpt {
     #!/usr/bin/env python
     import scgpt as scg
     import scanpy as sc
-    from pathlib import Path
     import os
     import pandas as pd
 
@@ -41,12 +40,12 @@ process embed_by_scgpt {
         model_dir,
         gene_col = gene_col,
         batch_size = ${params.batch_size},
-        return_new_adata = False,
+        obs_to_save = list(adata.obs.columns),
+        return_new_adata = True,
     )
-    
-    embedding = adata_embedding.obsm['X_scGPT']
-    var_names = [f'V{i+1}' for i in range(embedding.shape[1])]
-    adata_embedding = sc.AnnData(X=embedding, obs=adata.obs.copy(), var=pd.DataFrame(index=var_names))
+
+    adata_embedding.obs = adata.obs.copy()
+    adata_embedding.var = pd.DataFrame(index=[f'V{i+1}' for i in range(adata_embedding.n_vars)])
     if 'spatial' in adata.obsm:
         adata_embedding.obsm['spatial'] = adata.obsm['spatial']
     adata_embedding.write(f"scgpt_embeddings.h5ad")
@@ -59,9 +58,9 @@ process embed_by_scgpt {
 }
 
 
-params.finetune_batch_size   = 16
-params.finetune_epoch        = 4
-params.finetune_eval_size    = 0.1
+params.finetune_batch_size   = 32   // official scGPT annotation batch size
+params.finetune_epoch        = 10   // official scGPT annotation epochs
+params.finetune_eval_size    = 0.2
 params.predict_batch_size    = 64
 params.finetune_results_dir  = ""
 
@@ -156,7 +155,7 @@ process finetune_by_scgpt {
         pre_norm=False,
         amp=True,  # Automatic Mixed Precision
         include_zero_gene = False,
-        freeze = True, #freeze
+        freeze = False, #freeze
         DSBN = False,  # Domain-spec batchnorm
     )
 
@@ -328,15 +327,20 @@ process finetune_by_scgpt {
     celltypes_labels = adata.obs["celltype_id"].tolist()  # make sure count from 0
     celltypes_labels = np.array(celltypes_labels)
 
-    (
-        train_data,
-        valid_data,
-        train_celltype_labels,
-        valid_celltype_labels,
-    ) = train_test_split(
-        all_counts, celltypes_labels, 
-        test_size=${params.finetune_eval_size}, shuffle=True
-    )
+    # Crash-safe stratified split: every class keeps >=1 training sample; a class too
+    # small to spare one for validation goes entirely to train (benchmark fairness).
+    def _min_train_split(_labels, _vf, _seed=42):
+        _labels = np.asarray(_labels); _rng = np.random.RandomState(_seed)
+        _tr, _va = [], []
+        for _c in np.unique(_labels):
+            _ix = np.where(_labels == _c)[0]; _rng.shuffle(_ix)
+            _nv = min(int(len(_ix) * _vf), len(_ix) - 1)
+            _va.extend(_ix[:_nv].tolist()); _tr.extend(_ix[_nv:].tolist())
+        _rng.shuffle(_tr); _rng.shuffle(_va)
+        return np.array(_tr, dtype=int), np.array(_va, dtype=int)
+    _tr_idx, _va_idx = _min_train_split(celltypes_labels, ${params.finetune_eval_size}, 42)
+    train_data, valid_data = all_counts[_tr_idx], all_counts[_va_idx]
+    train_celltype_labels, valid_celltype_labels = celltypes_labels[_tr_idx], celltypes_labels[_va_idx]
 
     # ============================= #
 
@@ -1157,4 +1161,468 @@ process predict_by_scgpt {
     """
 
 
+}
+
+
+// ============================ batch integration ============================ //
+// Native scGPT batch integration (upstream Tutorial_Integration recipe): fine-tune
+// the pretrained model with DSBN (domain-specific batchnorm keyed on batch) + DAB
+// (domain adaptation by reverse backprop / adversarial-on-batch) + GEPC/MVC + ECS,
+// using ONLY batch labels. The cell-type classifier (CLS) is OFF, so no cell type
+// enters training/inference. The original obs (incl. cell_type + the string
+// batch_id) is preserved for the downstream scIB benchmark. The integrated cell
+// embedding is extracted via model.encode_batch with cells SORTED by batch (DSBN
+// applies one batch's stats per chunk using batch_labels[0]).
+
+params.batch_key              = "batch_id"
+params.integration_epoch      = 15
+params.integration_batch_size = 64
+params.integration_n_hvg      = 1200
+
+process integrate_by_scgpt {
+
+    tag "${id}"
+
+    label 'gpu_task'
+
+    container 'housy17/scgpt:0.2.4'
+
+    publishDir "${params.emb_results_dir}/embeddings/scgpt_integrated", mode: 'copy',
+               saveAs: { filename -> "${id}.h5ad" }, enabled: params.emb_results_dir as boolean
+
+    input:
+    tuple val(id), path(raw_h5ad)
+
+    output:
+    tuple val(id), val("scGPT (integrated)"), path("*embeddings.h5ad")
+
+    script:
+    """
+    #!/usr/bin/env python
+    import copy
+    import json
+    import os
+    import sys
+    import warnings
+    from pathlib import Path
+    from typing import Dict, Tuple
+
+    import numpy as np
+    import pandas as pd
+    import scanpy as sc
+    import torch
+    from scipy.sparse import issparse
+    from sklearn.model_selection import train_test_split
+    from torch import nn
+    from torch.utils.data import Dataset, DataLoader
+
+    import scgpt as scg
+    from scgpt.model import TransformerModel
+    from scgpt.tokenizer import tokenize_and_pad_batch, random_mask_value
+    from scgpt.loss import masked_mse_loss, criterion_neg_log_bernoulli
+    from scgpt.tokenizer.gene_tokenizer import GeneVocab
+    from scgpt.preprocess import Preprocessor
+    from scgpt import SubsetsBatchSampler
+    from scgpt.utils import set_seed
+
+    os.environ["KMP_WARNINGS"] = "off"
+    warnings.filterwarnings("ignore")
+    set_seed(0)
+    logger = scg.logger
+
+    # ----------------------- integration config ----------------------- #
+    pad_token = "<pad>"
+    special_tokens = [pad_token, "<cls>", "<eoc>"]
+    mask_ratio = 0.4
+    mask_value = -1
+    pad_value = -2
+    n_bins = 51
+    n_input_bins = n_bins
+    n_hvg = ${params.integration_n_hvg}
+    max_seq_len = n_hvg + 1
+
+    input_emb_style = "continuous"
+    cell_emb_style = "cls"
+    mvc_decoder_style = "inner product"
+
+    MLM = True               # masked expression reconstruction (main objective)
+    CLS = False              # cell-type classifier OFF -> no label leakage
+    CCE = False
+    MVC = True               # GEPC: masked value prediction for cell embedding
+    ECS = True               # elastic cell similarity
+    DAB = True               # domain adaptation by reverse backprop (on batch)
+    INPUT_BATCH_LABELS = True
+    DSBN = True              # domain-specific batchnorm (on batch)
+    per_seq_batch_sample = True
+    explicit_zero_prob = True
+    do_sample_in_train = False
+    include_zero_gene = True  # official integration recipe: include all HVGs, including zeros
+
+    ecs_threshold = 0.8
+    dab_weight = 1.0
+
+    lr = 1e-4
+    batch_size = ${params.integration_batch_size}
+    eval_batch_size = ${params.integration_batch_size} * 2
+    epochs = ${params.integration_epoch}
+    schedule_interval = 1
+    schedule_ratio = 0.9
+    amp = True
+    log_interval = 100
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # --------------------------- load model --------------------------- #
+    model_dir = Path("/data/model_weights/${params.model}")
+    model_config_file = model_dir / "args.json"
+    model_file = model_dir / "best_model.pt"
+    vocab_file = model_dir / "vocab.json"
+
+    vocab = GeneVocab.from_file(vocab_file)
+    for s in special_tokens:
+        if s not in vocab:
+            vocab.append_token(s)
+
+    with open(model_config_file, "r") as f:
+        model_configs = json.load(f)
+    embsize = model_configs["embsize"]
+    nhead = model_configs["nheads"]
+    d_hid = model_configs["d_hid"]
+    nlayers = model_configs["nlayers"]
+
+    # ---------------------------- load data --------------------------- #
+    adata = sc.read_h5ad("${raw_h5ad}")
+    original_obs = adata.obs.copy()
+    original_spatial = adata.obsm["spatial"].copy() if "spatial" in adata.obsm else None
+
+    if "${params.batch_key}" not in adata.obs:
+        raise KeyError("scGPT integration requires adata.obs['${params.batch_key}']")
+
+    adata.var["gene_name"] = adata.var.index.tolist()
+    adata.obs["str_batch"] = adata.obs["${params.batch_key}"].astype(str)
+    adata.obs["batch_id_code"] = adata.obs["str_batch"].astype("category").cat.codes.values
+    num_batch_types = int(pd.unique(adata.obs["batch_id_code"]).shape[0])
+
+    # Gracefully degrade to a label-free fine-tune if there is nothing to integrate.
+    if num_batch_types < 2:
+        logger.info("Fewer than 2 batches; disabling batch-correction objectives.")
+        DAB = False
+        DSBN = False
+        INPUT_BATCH_LABELS = False
+        per_seq_batch_sample = False
+
+    # keep only genes present in the model vocabulary (subsets var, never obs)
+    adata.var["id_in_vocab"] = [1 if g in vocab else -1 for g in adata.var["gene_name"]]
+    adata = adata[:, adata.var["id_in_vocab"] >= 0]
+
+    # seurat_v3 HVG needs scikit-misc; fall back to cell_ranger if unavailable.
+    try:
+        import skmisc  # noqa: F401
+        hvg_flavor = "seurat_v3"
+    except Exception:
+        hvg_flavor = "cell_ranger"
+        logger.info("scikit-misc not found; using cell_ranger HVG flavor.")
+
+    def _build_preprocessor(flavor):
+        return Preprocessor(
+            use_key="X",
+            filter_gene_by_counts=3,
+            filter_cell_by_counts=False,
+            normalize_total=1e4,
+            result_normed_key="X_normed",
+            log1p=True,
+            result_log1p_key="X_log1p",
+            subset_hvg=n_hvg,
+            hvg_flavor=flavor,
+            binning=n_bins,
+            result_binned_key="X_binned",
+        )
+
+    # seurat_v3 batch-aware HVG occasionally hits a LOESS singularity on some
+    # datasets ("reciprocal condition number ~0"); fall back to the robust
+    # cell_ranger flavor (no batch_key) so one tissue can't abort the run.
+    adata_pre = adata.copy()
+    try:
+        _build_preprocessor(hvg_flavor)(adata, batch_key="str_batch")
+    except Exception as exc:
+        logger.info(f"HVG flavor={hvg_flavor} (batch-aware) failed ({exc}); retrying cell_ranger, no batch_key.")
+        adata = adata_pre.copy()
+        _build_preprocessor("cell_ranger")(adata, batch_key=None)
+    del adata_pre
+
+    input_layer_key = "X_binned"
+    all_counts = (
+        adata.layers[input_layer_key].toarray()
+        if issparse(adata.layers[input_layer_key])
+        else adata.layers[input_layer_key]
+    )
+    genes = adata.var["gene_name"].tolist()
+    batch_labels_all = adata.obs["batch_id_code"].values.astype(int)
+
+    vocab.set_default_index(vocab["<pad>"])
+    gene_ids = np.array(vocab(genes), dtype=int)
+
+    (
+        train_data,
+        valid_data,
+        train_batch_labels,
+        valid_batch_labels,
+    ) = train_test_split(
+        all_counts, batch_labels_all, test_size=${params.finetune_eval_size}, shuffle=True
+    )
+
+    tokenized_train = tokenize_and_pad_batch(
+        train_data, gene_ids, max_len=max_seq_len, vocab=vocab,
+        pad_token=pad_token, pad_value=pad_value, append_cls=True,
+        include_zero_gene=include_zero_gene,
+    )
+    tokenized_valid = tokenize_and_pad_batch(
+        valid_data, gene_ids, max_len=max_seq_len, vocab=vocab,
+        pad_token=pad_token, pad_value=pad_value, append_cls=True,
+        include_zero_gene=include_zero_gene,
+    )
+
+    def prepare_data(sort_seq_batch=False) -> Tuple[Dict[str, torch.Tensor]]:
+        masked_values_train = random_mask_value(
+            tokenized_train["values"], mask_ratio=mask_ratio,
+            mask_value=mask_value, pad_value=pad_value,
+        )
+        masked_values_valid = random_mask_value(
+            tokenized_valid["values"], mask_ratio=mask_ratio,
+            mask_value=mask_value, pad_value=pad_value,
+        )
+        train_data_pt = {
+            "gene_ids": tokenized_train["genes"],
+            "values": masked_values_train,
+            "target_values": tokenized_train["values"],
+            "batch_labels": torch.from_numpy(train_batch_labels).long(),
+        }
+        valid_data_pt = {
+            "gene_ids": tokenized_valid["genes"],
+            "values": masked_values_valid,
+            "target_values": tokenized_valid["values"],
+            "batch_labels": torch.from_numpy(valid_batch_labels).long(),
+        }
+        if sort_seq_batch:
+            train_sort_ids = np.argsort(train_batch_labels)
+            train_data_pt = {k: v[train_sort_ids] for k, v in train_data_pt.items()}
+            valid_sort_ids = np.argsort(valid_batch_labels)
+            valid_data_pt = {k: v[valid_sort_ids] for k, v in valid_data_pt.items()}
+        return train_data_pt, valid_data_pt
+
+    class SeqDataset(Dataset):
+        def __init__(self, data: Dict[str, torch.Tensor]):
+            self.data = data
+
+        def __len__(self):
+            return self.data["gene_ids"].shape[0]
+
+        def __getitem__(self, idx):
+            return {k: v[idx] for k, v in self.data.items()}
+
+    def prepare_dataloader(data_pt, batch_size, shuffle=False,
+                           intra_domain_shuffle=False, drop_last=False, num_workers=0):
+        if num_workers == 0:
+            num_workers = min(len(os.sched_getaffinity(0)), batch_size // 2)
+        dataset = SeqDataset(data_pt)
+        if per_seq_batch_sample:
+            subsets = []
+            batch_labels_array = data_pt["batch_labels"].numpy()
+            for batch_label in np.unique(batch_labels_array):
+                batch_indices = np.where(batch_labels_array == batch_label)[0].tolist()
+                subsets.append(batch_indices)
+            return DataLoader(
+                dataset=dataset,
+                batch_sampler=SubsetsBatchSampler(
+                    subsets, batch_size,
+                    intra_subset_shuffle=intra_domain_shuffle,
+                    inter_subset_shuffle=shuffle, drop_last=drop_last,
+                ),
+                num_workers=num_workers, pin_memory=True,
+            )
+        return DataLoader(
+            dataset=dataset, batch_size=batch_size, shuffle=shuffle,
+            drop_last=drop_last, num_workers=num_workers, pin_memory=True,
+        )
+
+    # --------------------------- build model -------------------------- #
+    ntokens = len(vocab)
+    model = TransformerModel(
+        ntokens, embsize, nhead, d_hid, nlayers,
+        nlayers_cls=3, n_cls=1, vocab=vocab, dropout=0.2,
+        pad_token=pad_token, pad_value=pad_value,
+        do_mvc=MVC, do_dab=DAB, use_batch_labels=INPUT_BATCH_LABELS,
+        num_batch_labels=num_batch_types, domain_spec_batchnorm=DSBN,
+        input_emb_style=input_emb_style, n_input_bins=n_input_bins,
+        cell_emb_style=cell_emb_style, mvc_decoder_style=mvc_decoder_style,
+        ecs_threshold=ecs_threshold, explicit_zero_prob=explicit_zero_prob,
+        use_fast_transformer=True, fast_transformer_backend="flash", pre_norm=False,
+    )
+
+    try:
+        model.load_state_dict(torch.load(model_file))
+        logger.info(f"Loaded all model params from {model_file}")
+    except Exception:
+        model_dict = model.state_dict()
+        pretrained_dict = torch.load(model_file)
+        pretrained_dict = {
+            k: v for k, v in pretrained_dict.items()
+            if k in model_dict and v.shape == model_dict[k].shape
+        }
+        logger.info(f"Loaded {len(pretrained_dict)}/{len(model_dict)} pretrained params.")
+        model_dict.update(pretrained_dict)
+        model.load_state_dict(model_dict)
+
+    model.to(device)
+
+    criterion = masked_mse_loss
+    criterion_dab = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr, eps=1e-4 if amp else 1e-8)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, schedule_interval, gamma=schedule_ratio)
+    scaler = torch.cuda.amp.GradScaler(enabled=amp)
+
+    def train(model, loader):
+        model.train()
+        running = 0.0
+        for batch, batch_data in enumerate(loader):
+            input_gene_ids = batch_data["gene_ids"].to(device)
+            input_values = batch_data["values"].to(device)
+            target_values = batch_data["target_values"].to(device)
+            batch_labels = batch_data["batch_labels"].to(device)
+            src_key_padding_mask = input_gene_ids.eq(vocab[pad_token])
+            with torch.cuda.amp.autocast(enabled=amp):
+                output_dict = model(
+                    input_gene_ids, input_values,
+                    src_key_padding_mask=src_key_padding_mask,
+                    batch_labels=batch_labels if (DSBN or INPUT_BATCH_LABELS) else None,
+                    CLS=False, CCE=CCE, MVC=MVC, ECS=ECS, do_sample=do_sample_in_train,
+                )
+                masked_positions = input_values.eq(mask_value)
+                loss = criterion(output_dict["mlm_output"], target_values, masked_positions)
+                if explicit_zero_prob:
+                    loss = loss + criterion_neg_log_bernoulli(
+                        output_dict["mlm_zero_probs"], target_values, masked_positions
+                    )
+                if MVC:
+                    loss = loss + criterion(
+                        output_dict["mvc_output"], target_values, masked_positions
+                    )
+                if MVC and explicit_zero_prob:
+                    loss = loss + criterion_neg_log_bernoulli(
+                        output_dict["mvc_zero_probs"], target_values, masked_positions
+                    )
+                if ECS:
+                    loss = loss + 10.0 * output_dict["loss_ecs"]
+                if DAB:
+                    loss = loss + dab_weight * criterion_dab(
+                        output_dict["dab_output"], batch_labels
+                    )
+            model.zero_grad()
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0, error_if_nonfinite=False)
+            scaler.step(optimizer)
+            scaler.update()
+            running += loss.item()
+            if batch % log_interval == 0 and batch > 0:
+                logger.info(f"epoch {epoch:3d} | {batch:4d}/{len(loader):4d} | loss {running / log_interval:6.3f}")
+                running = 0.0
+
+    def evaluate(model, loader):
+        model.eval()
+        total_loss = 0.0
+        total_num = 0
+        with torch.no_grad():
+            for batch_data in loader:
+                input_gene_ids = batch_data["gene_ids"].to(device)
+                input_values = batch_data["values"].to(device)
+                target_values = batch_data["target_values"].to(device)
+                batch_labels = batch_data["batch_labels"].to(device)
+                src_key_padding_mask = input_gene_ids.eq(vocab[pad_token])
+                with torch.cuda.amp.autocast(enabled=amp):
+                    output_dict = model(
+                        input_gene_ids, input_values,
+                        src_key_padding_mask=src_key_padding_mask,
+                        batch_labels=batch_labels if (DSBN or INPUT_BATCH_LABELS) else None,
+                        CLS=False, CCE=False, MVC=False, ECS=False, do_sample=do_sample_in_train,
+                    )
+                    masked_positions = input_values.eq(mask_value)
+                    loss = criterion(output_dict["mlm_output"], target_values, masked_positions)
+                total_loss += loss.item() * len(input_gene_ids)
+                total_num += len(input_gene_ids)
+        return total_loss / max(total_num, 1)
+
+    # ----------------------------- fine-tune -------------------------- #
+    best_val_loss = float("inf")
+    best_model = None
+    for epoch in range(1, epochs + 1):
+        train_data_pt, valid_data_pt = prepare_data(sort_seq_batch=per_seq_batch_sample)
+        train_loader = prepare_dataloader(
+            train_data_pt, batch_size=batch_size, shuffle=False,
+            intra_domain_shuffle=True, drop_last=False,
+        )
+        valid_loader = prepare_dataloader(
+            valid_data_pt, batch_size=eval_batch_size, shuffle=False,
+            intra_domain_shuffle=False, drop_last=False,
+        )
+        train(model, train_loader)
+        val_loss = evaluate(model, valid_loader)
+        logger.info(f"end of epoch {epoch:3d} | valid mse {val_loss:6.4f}")
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_model = copy.deepcopy(model)
+        scheduler.step()
+
+    if best_model is not None:
+        model = best_model
+
+    # ----------------- extract integrated embedding ------------------- #
+    # Cells MUST be grouped by batch: encode_batch applies DSBN per chunk using
+    # batch_labels[0], so each batch_size chunk must be single-batch.
+    model.eval()
+    if per_seq_batch_sample:
+        sort_idx = np.argsort(adata.obs["batch_id_code"].values)
+    else:
+        sort_idx = np.arange(adata.n_obs)
+    adata_sorted = adata[sort_idx]
+    all_counts_emb = (
+        adata_sorted.layers[input_layer_key].toarray()
+        if issparse(adata_sorted.layers[input_layer_key])
+        else adata_sorted.layers[input_layer_key]
+    )
+    batch_ids_emb = adata_sorted.obs["batch_id_code"].values.astype(int)
+
+    tokenized_all = tokenize_and_pad_batch(
+        all_counts_emb, gene_ids, max_len=max_seq_len, vocab=vocab,
+        pad_token=pad_token, pad_value=pad_value, append_cls=True, include_zero_gene=True,
+    )
+    all_gene_ids = tokenized_all["genes"]
+    all_values = tokenized_all["values"]
+    src_key_padding_mask = all_gene_ids.eq(vocab[pad_token])
+
+    with torch.no_grad(), torch.cuda.amp.autocast(enabled=amp):
+        cell_embeddings = model.encode_batch(
+            all_gene_ids, all_values.float(),
+            src_key_padding_mask=src_key_padding_mask,
+            batch_size=eval_batch_size,
+            batch_labels=torch.from_numpy(batch_ids_emb).long() if (DSBN or INPUT_BATCH_LABELS) else None,
+            time_step=0, return_np=True,
+        )
+    cell_embeddings = cell_embeddings / np.linalg.norm(cell_embeddings, axis=1, keepdims=True)
+
+    import anndata as ad
+    obs_out = original_obs.iloc[sort_idx].copy()
+    adata_embedding = ad.AnnData(
+        X=np.asarray(cell_embeddings, dtype=np.float32),
+        obs=obs_out,
+        var=pd.DataFrame(index=[f"V{i+1}" for i in range(cell_embeddings.shape[1])]),
+    )
+    if original_spatial is not None:
+        adata_embedding.obsm["spatial"] = original_spatial[sort_idx]
+    adata_embedding.write("scgpt_integrated_embeddings.h5ad")
+
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)
+    """
 }

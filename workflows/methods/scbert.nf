@@ -98,7 +98,7 @@ workflow embed_by_scbert {
         _embed_by_scbert.out
 }
 
-params.finetune_epoch        = 20
+params.finetune_epoch        = 100  // official scBERT max epochs; early-stopping (patience 10) governs
 params.finetune_eval_size    = 0.2  // 默认就是 0.2
 params.finetune_batch_size   = 8
 params.predict_batch_size    = 32
@@ -124,11 +124,17 @@ process _finetune_by_scbert {
     script:
     def grad_acc = Math.round(3 * 60 / params.finetune_batch_size)
     """
-    torchrun --standalone --nproc_per_node=1 /code/scbert/finetune_updated.py \\
+    # --standalone pins the rendezvous to a fixed port (localhost:29400), so two scbert
+    # jobs co-located on one node collide (RendezvousConnectionError). Bind a unique free
+    # port per run instead -> concurrent per-tissue jobs never clash.
+    MASTER_PORT=\$(python -c 'import socket; s=socket.socket(); s.bind(("",0)); p=s.getsockname()[1]; s.close(); print(p)')
+    torchrun --rdzv-backend=c10d --rdzv-endpoint=localhost:\$MASTER_PORT --rdzv-id=scbert_\$MASTER_PORT \\
+        --nproc_per_node=1 /code/scbert/finetune_updated.py \\
         --data_path ${processed_h5ad} \\
         --model_path "/data/model_weights/${params.model}" \\
         --batch_size ${params.finetune_batch_size} \\
         --grad_acc ${grad_acc} \\
+        --bin_num ${params.bin_num} \\
         --epoch ${params.finetune_epoch}  \\
         --eval_size ${params.finetune_eval_size} \\
         --ckpt_dir "./scbert_finetuned_model/" \\
@@ -159,6 +165,7 @@ process _predict_by_scbert {
     python /code/scbert/predict_updated.py \\
         --data_path ${processed_test_h5ad} \\
         --model_path ${model_weights} \\
+        --bin_num ${params.bin_num} \\
         --batch_size ${params.predict_batch_size}
     """
 

@@ -4,6 +4,7 @@ import scanpy as sc
 from anndata import AnnData
 from functools import partial
 from scipy.sparse import csr_matrix as csm
+from scipy.sparse import issparse
 import os
 
 import torch
@@ -138,21 +139,24 @@ class SCrna():
         self.geneset = {j: i + 1 for i, j in enumerate(self.gene_info.index)}
 
         selected_genes_list = adata.var_names.tolist()
-        selected_genes, _ = map_gene_list(selected_genes_list, self.gene_info)
-        selected_genes = selected_genes[:2048]  # 2048
-        pad_len = 2048 - len(selected_genes)
-        pad_genes = [f'__pad_{i}__' for i in range(pad_len)]
-        self.full_gene_list = selected_genes + pad_genes
-        self.selected_gene_len = len(selected_genes)
+        # Faithful to the original MindSpore CellFM (data_process.py): keep the FULL
+        # set of genes shared with the model vocabulary, in canonical (sorted) order.
+        # np.intersect1d returns sorted unique values, so the gene panel and its
+        # ordering are dataset-independent. The 2048 cap is applied per-cell downstream
+        # in Prepare.sample (expression-weighted sampling only when a cell has >2048
+        # nonzero genes), NOT by truncating the panel to the first 2048 var-order genes.
+        used_genes = list(np.intersect1d(
+            np.asarray(selected_genes_list, dtype=object),
+            self.gene_info.index.values,
+        ))
+        self.full_gene_list = used_genes
+        self.selected_gene_len = len(used_genes)
 
-        used_genes = [g for g in selected_genes if g in adata.var_names]
-        pad_num = 2048 - len(used_genes)
-        # print(f"[Info] Selected: {len(selected_genes)}, Found: {len(used_genes)}, Padding: {pad_num}")
+        X = adata[:, used_genes].X
+        if not issparse(X):
+            X = csm(X)
+        X = X.astype(np.int32)
 
-        X = adata[:, used_genes].X.toarray().astype(np.int32)
-        # pad_X = np.zeros((X.shape[0], pad_num), dtype=np.int32)
-        # X_padded = np.concatenate([X, pad_X], axis=1)
-        
         ####### add cell type information ######
         if "celltype_id" not in adata.obs.columns:
             celltype_id_labels = adata.obs["celltype"].astype("category").cat.codes.values
@@ -182,25 +186,28 @@ class SCrna():
 
         from anndata import AnnData
         new_adata = AnnData(X)
-        # new_adata = AnnData(X_padded)
         new_adata.obs = adata.obs.copy()
-        # new_adata.var_names = self.full_gene_list
         new_adata.var_names = used_genes
 
         self.adata = new_adata
         self.gene = np.array([
-            self.geneset.get(g, 0) for g in self.full_gene_list
+            self.geneset.get(g, 0) for g in used_genes
         ], dtype=np.int32)
 
         self.T = np.asarray(self.adata.X.sum(1)).ravel()
-        self.data = self.adata.X.astype(np.int32)
+        # Keep the full-panel counts sparse; densify per-cell in __getitem__ so a
+        # ~20k-gene panel does not force an [N, 20k] dense matrix into memory.
+        self.data = self.adata.X.tocsr().astype(np.int32)
         # print(f"Use adata shape: {self.adata.shape}")
 
     def __len__(self):
         return len(self.adata)
 
     def __getitem__(self, idx):
-        data = np.asarray(self.data[idx], dtype=np.float32)
+        row = self.data[idx]
+        if issparse(row):
+            row = row.toarray()
+        data = np.asarray(row, dtype=np.float32).ravel()
         T = np.asarray(self.T[idx], dtype=np.float32)
         gene = np.asarray(self.gene, dtype=np.int32)
         celltype_label = self.celltypes_labels[idx]  # single cell label

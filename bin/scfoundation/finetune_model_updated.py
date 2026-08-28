@@ -133,6 +133,14 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--early_stop_patience', type=int, default=4)
     parser.add_argument('--label_key', type=str, default='cell_type', help='Key of the label column')
+    # ---- training-strategy knobs (defaults = the current warmup+cosine, 1e-4 config) ----
+    parser.add_argument('--lr', type=float, default=1e-4, help='peak learning rate for all param groups')
+    parser.add_argument('--scheduler', type=str, default='warmup_cosine',
+                        choices=['none', 'warmup_cosine'],
+                        help="'none' = constant lr (the original strategy); 'warmup_cosine' = warmup->cosine")
+    parser.add_argument('--warmup_ratio', type=float, default=0.1, help='warmup fraction of total steps')
+    parser.add_argument('--min_lr', type=float, default=1e-5, help='cosine floor lr')
+    parser.add_argument('--grad_clip', type=float, default=0.0, help='max grad norm (0 = disabled)')
 
     args = parser.parse_args()
 
@@ -153,10 +161,18 @@ if __name__ == '__main__':
     label2id = {label: i for i, label in enumerate(np.unique(labels))}
     id2label = {i: label for label, i in label2id.items()}
     adata.obs['cell_type'] = adata.obs[args.label_key].map(label2id)
-    train_idx, val_idx = train_test_split(
-        range(len(labels)), test_size=args.val_size,
-        random_state=args.seed, stratify=labels,
-    )
+    # Crash-safe stratified split: every class keeps >=1 training sample; a class too
+    # small to spare one for validation (floor(count*val_size)==0) goes entirely to train.
+    def _min_train_split(_labels, _vf, _seed=42):
+        _labels = np.asarray(_labels); _rng = np.random.RandomState(_seed)
+        _tr, _va = [], []
+        for _c in np.unique(_labels):
+            _ix = np.where(_labels == _c)[0]; _rng.shuffle(_ix)
+            _nv = min(int(len(_ix) * _vf), len(_ix) - 1)
+            _va.extend(_ix[:_nv].tolist()); _tr.extend(_ix[_nv:].tolist())
+        _rng.shuffle(_tr); _rng.shuffle(_va)
+        return np.array(_tr, dtype=int), np.array(_va, dtype=int)
+    train_idx, val_idx = _min_train_split(labels, args.val_size, args.seed)
     dataset = FineTuneDataset(adata)
     train_dataset = Subset(dataset, train_idx)
     val_dataset = Subset(dataset, val_idx)
@@ -181,39 +197,66 @@ if __name__ == '__main__':
     print(model)
     
     trainable_encoder_params = [p for p in model.encoder.parameters() if p.requires_grad]
+    # LR + schedule are configurable (see --lr/--scheduler). Backbone stays frozen (only
+    # transformer_encoder[-2] + head trainable); the schedule/clip knobs let us A/B the
+    # original constant-5e-5 strategy against warmup->cosine variants fairly.
     param_groups = [
-        {"params": trainable_encoder_params,"lr": 5e-5,},
-        {"params": model.fc1.parameters(),"lr": 5e-5,},
-        {"params": model.norm.parameters(),"lr": 5e-5,}
+        {"params": trainable_encoder_params, "lr": args.lr},
+        {"params": model.fc1.parameters(), "lr": args.lr},
+        {"params": model.norm.parameters(), "lr": args.lr},
     ]
     optimizer = torch.optim.AdamW(param_groups, weight_decay=0.01)
 
-    total_train_steps = len(train_loader) * args.epochs
-    # scheduler = WarmupCosineScheduler(
-    #     optimizer,
-    #     warmup_steps=args.warmup_steps,
-    #     max_steps=total_train_steps,
-    #     min_lr=1e-5,
-    # )
+    total_train_steps = max(1, len(train_loader) * args.epochs)
+    if args.scheduler == 'warmup_cosine':
+        warmup_steps = max(1, int(args.warmup_ratio * total_train_steps))
+        scheduler = WarmupCosineScheduler(
+            optimizer, warmup_steps=warmup_steps,
+            max_steps=total_train_steps, min_lr=args.min_lr,
+        )
+    else:
+        scheduler = None  # constant lr = the original strategy
+    print(f">>> strategy: lr={args.lr} scheduler={args.scheduler} "
+          f"warmup_ratio={args.warmup_ratio} min_lr={args.min_lr} grad_clip={args.grad_clip}")
 
     criterion = torch.nn.CrossEntropyLoss()
 
-    min_val_loss = float('inf')
+    best_val_acc = -1.0   # select best-ckpt + early-stop on val ACCURACY (val_loss is
+                          # NaN under the required fp16 autocast; val_acc is robust)
     early_stop_patience = args.early_stop_patience
     early_stop_counter = 0
+    best_saved = False    # guard: guarantee a usable ckpt gets written
+
+    def _save_ckpt(epoch, tag, metric):
+        ckpt = {
+            "epoch": epoch,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "label2id": label2id,
+            "id2label": id2label,
+            "model_config": getattr(model, "model_config", None),
+        }
+        torch.save(ckpt, save_path)
+        print(f">>> {tag} ckpt saved to: {save_path} ({metric})")
 
     for epoch in range(args.epochs):
         model.train()
         for batch in train_loader:
             data, labels = batch
+            if data.size(0) == 1:
+                # BatchNorm(train) needs >1 sample; skip a size-1 trailing batch (n_train % batch_size == 1)
+                continue
             data = data.to(device)
             labels = labels.to(device)
             optimizer.zero_grad()
             outputs = model(data)
             loss = criterion(outputs, labels)
             loss.backward()
+            if args.grad_clip and args.grad_clip > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
             optimizer.step()
-            # scheduler.step()
+            if scheduler is not None:
+                scheduler.step()
             print(f'Epoch {epoch}, Train Loss: {loss.item()}')
         del data, labels, loss, outputs
         optimizer.zero_grad(set_to_none=True)
@@ -222,40 +265,47 @@ if __name__ == '__main__':
 
         model.eval()
         val_loss = 0
+        val_correct = 0
+        val_total = 0
         with torch.no_grad():
+            # autocast stays ON (the fp32 eval forward OOMs on scFoundation's encoder).
+            # Under fp16 the loss overflows to NaN, so we select on val_ACCURACY (robust
+            # via argmax) instead of val_loss -- see best-ckpt/early-stop logic below.
             with torch.cuda.amp.autocast():
                 for batch in val_loader:
                     data, labels = batch
                     data = data.to(device)
                     labels = labels.to(device)
                     outputs = model(data)
-                    loss = criterion(outputs, labels)
+                    # compute the loss in fp32: under autocast the fp16 CrossEntropy
+                    # overflowed to NaN, which silently broke best-checkpoint selection
+                    # AND early-stopping (NaN counts as "no improvement" -> stops at
+                    # ~patience epochs while val_acc is still rising).
+                    loss = criterion(outputs.float(), labels)
                     val_loss += loss.item()
-                    print(f'Epoch {epoch}, Val Loss: {loss.item()}')
+                    val_correct += (outputs.argmax(dim=-1) == labels).sum().item()
+                    val_total += labels.size(0)
+                val_acc = val_correct / max(1, val_total)
+                print(f'[DIAG] Epoch {epoch}: val_loss_sum={val_loss:.4f} val_acc={val_acc:.4f} (n_val={val_total})')
 
-                if val_loss < min_val_loss:
-                    min_val_loss = val_loss
+                # Select on val ACCURACY (higher is better) -- robust to the fp16 NaN loss.
+                if val_acc > best_val_acc:
+                    best_val_acc = val_acc
                     early_stop_counter = 0
-                    ckpt = {
-                        "epoch": epoch,
-                        "model_state_dict": model.state_dict(),
-                        "optimizer_state_dict": optimizer.state_dict(),
-                        # "scheduler_state_dict": scheduler.state_dict(),
-                        "label2id": label2id,
-                        "id2label": id2label,
-                        "model_config": getattr(model, "model_config", None),
-                    }
-                    torch.save(ckpt, save_path)
-                    print(f">>> New best ckpt saved to: {save_path} (val_loss={min_val_loss:.4f})")
+                    _save_ckpt(epoch, "New best", f"val_acc={best_val_acc:.4f}")
+                    best_saved = True
                 else:
                     early_stop_counter += 1
                     if early_stop_counter >= early_stop_patience:
                         print(f'Early stopping at epoch {epoch}')
-                        # torch.save(model.state_dict(), os.path.join(args.ckpt_path, f'last_model.ckpt'))
                         break
 
                 del data, labels, loss, outputs
                 torch.cuda.empty_cache()
                 torch.cuda.synchronize()
 
-        
+    # Fallback: if val_loss was never finite (e.g. divergence -> NaN), no best was saved;
+    # persist the final model so prediction always has a checkpoint to load.
+    if not best_saved:
+        print(">>> WARNING: no best ckpt during training; saving final model as fallback.")
+        _save_ckpt(args.epochs - 1, "Fallback (final)", f"best_val_acc={best_val_acc:.4f}")

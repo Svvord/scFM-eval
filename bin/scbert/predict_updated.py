@@ -102,7 +102,7 @@ class Identity(torch.nn.Module):
         return x
 
 data = sc.read_h5ad(args.data_path)
-barcodes = data.obs['barcode'].tolist()
+barcodes = data.obs['barcode'].tolist() if 'barcode' in data.obs else data.obs_names.tolist()
 data = data.X
 test_dataset = SCDataset(data)
 test_loader = DataLoader(
@@ -142,4 +142,3 @@ label_names = [id2label[i] for i in range(len(id2label))]
 import pandas as pd
 df = pd.DataFrame(probs, columns=label_names, index=barcodes)
 df.to_csv("scbert_predictions.tsv", sep="\t")
-

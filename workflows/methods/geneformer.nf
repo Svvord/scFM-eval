@@ -18,12 +18,16 @@ process preprocess_for_geneformer {
     """
     #!/usr/bin/env python
     import scanpy as sc
+    import numpy as np
     from pathlib import Path
     from scipy.sparse import issparse, csr_matrix
 
     adata = sc.read_h5ad("${raw_h5ad}")
-    adata.obs['n_counts'] = adata.X.sum(axis=1)
-    adata.obs['barcode'] = adata.obs_names.tolist()
+    adata.obs['n_counts'] = np.asarray(adata.X.sum(axis=1)).ravel()
+    if 'barcode' not in adata.obs:
+        adata.obs['barcode'] = adata.obs_names.tolist()
+    if 'filter_pass' in adata.obs:
+        adata.obs.drop(columns=['filter_pass'], inplace=True)
     # ensembl_id 应在数据预处理的步骤加入, 
     # 不在 geneformer 的预处理加入是因为有好几个方法都使用 ensembl
     # adata.var['ensembl_id'] = xxx
@@ -55,18 +59,29 @@ process _embed_by_geneformer {
     from geneformer import EmbExtractor
     from geneformer import TranscriptomeTokenizer
 
-    tk = TranscriptomeTokenizer({'barcode': 'barcode'}, nproc=16)  # for V1 model, set model_version="V1"
+    model_name = os.path.basename("${params.model}".rstrip("/"))
+    if "V1" in model_name:
+        model_version = "V1"
+    elif "V2" in model_name:
+        model_version = "V2"
+    else:
+        raise ValueError(f"Cannot infer Geneformer model version from model path: {model_name}")
+    emb_mode = "cls" if model_version == "V2" else "cell"
+
+    tk = TranscriptomeTokenizer(
+        {'barcode': 'barcode'},
+        nproc=16,
+        model_version=model_version,
+    )
     tk.tokenize_data(
         './preproc',            # "data_directory"
         './',                   # "output_directory"
         "transformed",          # "output_prefix"
         file_format="h5ad"
     )
-
-    model_version = "${params.model}".split('-')[1]
     embex = EmbExtractor(
         model_type="Pretrained",
-        emb_mode='cell',
+        emb_mode=emb_mode,
         model_version=model_version,
         max_ncells=None,
         emb_label=['barcode'],
@@ -110,7 +125,14 @@ process postprocess_for_geneformer {
     embedding = pd.read_csv("${embedding}", index_col=0)
     embedding.index = [str(item) for item in embedding['barcode'].values]
     embedding.drop(columns=['barcode'], inplace=True, errors='ignore')
-    embedding = embedding.loc[ori_adata.obs_names, :].values
+    if 'barcode' in obs.columns:
+        expected_index = obs['barcode'].astype(str).tolist()
+    else:
+        expected_index = obs.index.astype(str).tolist()
+    missing = [item for item in expected_index if item not in embedding.index]
+    if missing:
+        raise KeyError(f"{len(missing)} cells are missing from Geneformer embeddings; first missing barcode: {missing[0]}")
+    embedding = embedding.loc[expected_index, :].values
 
     var_names = [f'V{i+1}' for i in range(embedding.shape[1])]
     adata_embedding = ad.AnnData(X=embedding, obs=obs, var=pd.DataFrame(index=var_names))
@@ -166,10 +188,41 @@ process _finetune_by_geneformer {
     from geneformer import TranscriptomeTokenizer
     from pathlib import Path
 
+    # Geneformer splits train/valid internally via HF Dataset.train_test_split(
+    # stratify_by_column=...), which raises on singleton classes. Patch it (local to
+    # this process) to a crash-safe stratified split consistent with the other methods:
+    # every class keeps >=1 training sample; a class too small to spare one for
+    # validation goes entirely to train. Non-stratified calls fall through unchanged.
+    import numpy as _np
+    import datasets as _hfds
+    _orig_tts = _hfds.Dataset.train_test_split
+    def _safe_train_test_split(self, test_size=None, stratify_by_column=None, seed=42, **_kw):
+        if stratify_by_column is None or test_size is None:
+            return _orig_tts(self, test_size=test_size,
+                             stratify_by_column=stratify_by_column, seed=seed, **_kw)
+        _labels = _np.asarray(self[stratify_by_column]); _rng = _np.random.RandomState(42 if seed is None else seed)
+        _tr, _va = [], []
+        for _c in _np.unique(_labels):
+            _ix = _np.where(_labels == _c)[0]; _rng.shuffle(_ix)
+            _nv = min(int(len(_ix) * test_size), len(_ix) - 1)
+            _va.extend(_ix[:_nv].tolist()); _tr.extend(_ix[_nv:].tolist())
+        _rng.shuffle(_tr); _rng.shuffle(_va)
+        return _hfds.DatasetDict({"train": self.select(_tr), "test": self.select(_va)})
+    _hfds.Dataset.train_test_split = _safe_train_test_split
+
+    model_name = os.path.basename("${params.model}".rstrip("/"))
+    if "V1" in model_name:
+        model_version = "V1"
+    elif "V2" in model_name:
+        model_version = "V2"
+    else:
+        raise ValueError(f"Cannot infer Geneformer model version from model path: {model_name}")
+
     tk = TranscriptomeTokenizer(
         {'barcode': 'barcode', '${params.finetune_label_key}': 'cell_type'}, 
-        nproc=16
-    )  # for V1 model, set model_version="V1"
+        nproc=16,
+        model_version=model_version,
+    )
 
     tk.tokenize_data(
         './preproc',            # "data_directory"
@@ -177,19 +230,43 @@ process _finetune_by_geneformer {
         "transformed",          # "output_prefix"
         file_format="h5ad"
     )
-    
+
+    # Geneformer trains by STEPS. Per-tissue references are small, so 1 epoch can be
+    # only a few hundred steps -- too few updates, and an absolute warmup would never
+    # complete. Floor training at GENEFORMER_MIN_STEPS gradient steps; larger tissues
+    # keep their ~1-epoch budget. warmup_ratio scales warmup to the actual step count.
+    import math as _math
+    GENEFORMER_MIN_STEPS = 1000
+    _n_total = len(_hfds.load_from_disk("transformed.dataset"))
+    _n_train = int(round(_n_total * (1 - ${params.finetune_eval_size})))
+    _steps_per_epoch = max(1, _math.ceil(_n_train / ${params.finetune_batch_size}))
+    _max_steps = max(GENEFORMER_MIN_STEPS, _steps_per_epoch * ${params.finetune_epoch})
+    _eval_steps = max(50, _max_steps // 10)   # ~10 eval/save points for best-model selection
+    print(f"[geneformer] n_total={_n_total} n_train={_n_train} steps/epoch={_steps_per_epoch} -> max_steps={_max_steps} eval_steps={_eval_steps}")
+
     cell_state_dict = {
         "state_key": "cell_type",
         "states": "all",
     }
 
     training_args = {
-        "num_train_epochs": ${params.finetune_epoch},
+        "max_steps": _max_steps,                 # step floor (>=1000) instead of a raw epoch count
         "per_device_train_batch_size": ${params.finetune_batch_size},
         "lr_scheduler_type": "cosine",
         "learning_rate": 5e-5,
         "weight_decay": 0.01,
-        "warmup_steps": 200,
+        "warmup_ratio": 0.1,                     # warmup = 10% of actual steps (scales per tissue)
+        # Step-based eval + return best checkpoint (NO early stopping). Epoch-based eval
+        # gave large tissues only one eval point; step-based gives ~10 across any tissue
+        # size, so load_best_model_at_end actually selects a best checkpoint.
+        "evaluation_strategy": "steps",
+        "save_strategy": "steps",
+        "eval_steps": _eval_steps,
+        "save_steps": _eval_steps,
+        "load_best_model_at_end": True,
+        "metric_for_best_model": "macro_f1",
+        "greater_is_better": True,
+        "save_total_limit": 1,
         "seed": 1
     }
 
@@ -204,7 +281,7 @@ process _finetune_by_geneformer {
         num_crossval_splits=1,             # 简单 train/val
         split_sizes={"train": train_size, "valid": valid_size, "test": 0.0},
         forward_batch_size= 2 * ${params.finetune_batch_size},            # eval 时 batch size
-        model_version="V2",
+        model_version=model_version,
         nproc=16,
         ngpu=1,
     )
@@ -263,10 +340,19 @@ process _predict_by_geneformer {
     from geneformer import Classifier
     from geneformer import TranscriptomeTokenizer
 
+    model_name = os.path.basename("${params.model}".rstrip("/"))
+    if "V1" in model_name:
+        model_version = "V1"
+    elif "V2" in model_name:
+        model_version = "V2"
+    else:
+        raise ValueError(f"Cannot infer Geneformer model version from model path: {model_name}")
+
     tk = TranscriptomeTokenizer(
         {'barcode': 'barcode'}, 
-        nproc=16
-    )  # for V1 model, set model_version="V1"
+        nproc=16,
+        model_version=model_version,
+    )
 
     tk.tokenize_data(
         './preproc',            # "data_directory"
@@ -279,6 +365,7 @@ process _predict_by_geneformer {
         classifier="cell",
         cell_state_dict = {"state_key": "${params.finetune_label_key}", "states": "all"},
         forward_batch_size=${params.predict_batch_size},
+        model_version=model_version,
         nproc=16
     )
 
@@ -314,7 +401,6 @@ process _predict_by_geneformer {
     labels = id_class_dict.keys()
 
     predict_logits = []
-    predict_labels = []
     model.eval()
     evalset_len = len(test_data)
     label_name = 'label'
@@ -360,9 +446,9 @@ process _predict_by_geneformer {
                 attention_mask=attn_msk_batch.to("cuda"),
                 labels=None,
             )
-            predict_logits += [torch.squeeze(outputs.logits.to("cpu"))]
+            predict_logits += [outputs.logits.detach().to("cpu")]
     
-    logits_by_cell = torch.cat(predict_logits)
+    logits_by_cell = torch.cat(predict_logits, dim=0)
     last_dim = len(logits_by_cell.shape) - 1
     all_logits = logits_by_cell.reshape(-1, logits_by_cell.shape[last_dim])
 

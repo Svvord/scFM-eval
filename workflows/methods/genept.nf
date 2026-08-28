@@ -80,7 +80,7 @@ process embed_by_genept_s {
 
     container "housy17/genept:latest"
 
-    publishDir "${params.results_dir}/embeddings/genept_s", mode: 'copy',
+    publishDir "${params.emb_results_dir}/embeddings/genept_s", mode: 'copy',
                saveAs: { filename -> "${id}.h5ad" }
 
     input:
@@ -101,8 +101,6 @@ process embed_by_genept_s {
     import scipy.sparse as sp
     import anndata
     import pandas as pd
-
-    print(os.getenv("OPENAI_API_KEY"))
 
     client = OpenAI()
     def get_seq_embed_gpt(X, gene_names, prompt_prefix="", trunc_index = None):

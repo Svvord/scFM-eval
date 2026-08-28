@@ -134,12 +134,19 @@ def main():
     X = adata.X.toarray() if issparse(adata.X) else adata.X
     y = np.array([label2id[ct] for ct in adata.obs[args.label_key].tolist()])
 
-    train_idx, eval_idx = train_test_split(
-        range(len(adata)),
-        test_size=args.eval_size,
-        stratify=adata.obs[args.label_key].tolist(),
-        random_state=args.seed
-    )
+    # Crash-safe stratified split: every class keeps >=1 training sample; a class too
+    # small to spare one for validation (floor(count*eval_size)==0) goes entirely to train.
+    def _min_train_split(_labels, _vf, _seed=42):
+        _labels = np.asarray(_labels); _rng = np.random.RandomState(_seed)
+        _tr, _va = [], []
+        for _c in np.unique(_labels):
+            _ix = np.where(_labels == _c)[0]; _rng.shuffle(_ix)
+            _nv = min(int(len(_ix) * _vf), len(_ix) - 1)
+            _va.extend(_ix[:_nv].tolist()); _tr.extend(_ix[_nv:].tolist())
+        _rng.shuffle(_tr); _rng.shuffle(_va)
+        return np.array(_tr, dtype=int), np.array(_va, dtype=int)
+    train_idx, eval_idx = _min_train_split(
+        adata.obs[args.label_key].tolist(), args.eval_size, args.seed)
 
     train_dataset = EmbeddingDataset(X[train_idx], y[train_idx])
     eval_dataset = EmbeddingDataset(X[eval_idx], y[eval_idx])

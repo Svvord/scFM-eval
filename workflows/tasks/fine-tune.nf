@@ -413,36 +413,41 @@ workflow predict_by_scfoundation {
 //               scPRINT
 //==========================================
 
-include { preprocess_for_scprint_with_ct as preprocess_for_scprint } from "../methods/scprint.nf"
-include { _finetune_by_scprint; _predict_by_scprint } from "../methods/scprint.nf"
+// scPRINT is officially a ZERO-SHOT annotation model (a hierarchical classifier on the
+// cell embedding predicts labels on unseen data; no official finetune recipe). So it is
+// evaluated like the other zero-shot methods: frozen embedding + shared linear probe,
+// NOT the (off-label, heavy) native scPRINT finetune. The native _finetune_by_scprint /
+// _predict_by_scprint processes still exist in methods/scprint.nf but are no longer used.
+include { embed_by_scprint } from "../methods/scprint.nf"
 
 workflow finetune_by_scprint {
     take:
         Raw_H5ad_Channel
 
     main:
-        preprocess_for_scprint(Raw_H5ad_Channel, "human")
-        _finetune_by_scprint(preprocess_for_scprint.out)
+        InputChannel = embed_by_scprint(Raw_H5ad_Channel) // id, "scPRINT", embeddings_h5ad
+        finetune_by_cell_classifier(InputChannel)
 
     emit:
-        _finetune_by_scprint.out
+        finetune_by_cell_classifier.out
 }
 
 workflow predict_by_scprint {
     take:
         Raw_H5ad_and_Model_Weights_Channel
+        // tuple val(id), path(test_h5ad), path(model_weights)
 
     main:
         InputChannel = Raw_H5ad_and_Model_Weights_Channel.map{ id, h5ad, model -> tuple(id, h5ad)}
-        preprocess_for_scprint(InputChannel, "human")
-        SecondChannel = preprocess_for_scprint.out
+        embed_by_scprint(InputChannel)
+        SecondChannel = embed_by_scprint.out
             .combine(Raw_H5ad_and_Model_Weights_Channel, by: 0)
-            .map{ id, raw, processed, foo, model -> tuple(id, raw, processed, model)}
-        _predict_by_scprint(SecondChannel)
-        get_prediction_labels(_predict_by_scprint.out.map{ id, prob -> tuple(id, "scPRINT", prob)})
-    
+            .map{ id, method, embedding, foo, model -> tuple(id, method, embedding, model)}
+        predict_by_cell_classifier(SecondChannel)
+        get_prediction_labels(predict_by_cell_classifier.out.map{ id, prob -> tuple(id, "scPRINT", prob)})
+
     emit:
-        _predict_by_scprint.out
+        predict_by_cell_classifier.out
 }
 
 

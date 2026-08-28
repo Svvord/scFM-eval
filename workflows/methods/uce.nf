@@ -1,5 +1,5 @@
 params.model = "UCE/33l_8ep_1024t_1280.torch"
-params.batch_size = 64
+params.batch_size = 16
 params.emb_results_dir = "results"
 params.nlayers = 33
 
