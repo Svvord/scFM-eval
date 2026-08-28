@@ -157,6 +157,8 @@ workflow fit_and_infer {
 
 workflow {
 
+    log.warn "fewshot_by_scfm.nf is deprecated; use 'scfoundry transfer --method <method> --reference <support.h5ad> --query <query.h5ad> --classifier prototype' (or 'nextflow run main.nf --task transfer'). This entry point will be removed in a future release."
+
     if( !runners[ selected ] )
         exit 1, "Unknown method '${params.method}'. Allowed: ${runners.keySet().join(', ')}"
 

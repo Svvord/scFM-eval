@@ -201,6 +201,29 @@ class CommandLineTests(unittest.TestCase):
         r = self.sb.run("embed", "--method", "scgpt", "--data", os.path.join(ws, "missing.h5ad"), "--dry-run", cwd=ws)
         self.assertEqual(r.returncode, 2)
 
+    def test_transfer_modes(self):
+        ws = os.path.join(self.sb.dir, "ws")
+        self.sb.run("init", ws, "--runtime", "apptainer")
+        ref, q = os.path.join(ws, "ref.h5ad"), os.path.join(ws, "q.h5ad")
+        for f in (ref, q):
+            open(f, "w").close()
+        r = self.sb.run("transfer", "--method", "scgpt", "--reference", ref, "--query", q, "--dry-run", cwd=ws)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        params = json.loads(r.stdout.split("params.json:")[1].split("command (")[0])
+        self.assertEqual(params["classifier"], "logreg")
+        self.assertEqual((params["reference"], params["query"]), (os.path.realpath(ref), os.path.realpath(q)))
+        self.assertTrue(params["transfer_results_dir"].endswith("/results"))
+        self.assertIn("_scgpt_q", r.stdout)                       # run named after the query
+        r = self.sb.run("transfer", "--method", "scgpt", "--reference", ref, "--classifier", "knn", "--knn-k", "5", "--dry-run", cwd=ws)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('"knn_k": 5', r.stdout)
+        self.assertEqual(self.sb.run("transfer", "--method", "scgpt", "--query", q, "--dry-run", cwd=ws).returncode, 2)
+        model = os.path.join(ws, "model"); os.makedirs(model); open(os.path.join(model, "meta.json"), "w").write("{}")
+        r = self.sb.run("transfer", "--method", "scgpt", "--query", q, "--fitted", model, "--dry-run", cwd=ws)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.sb.run("transfer", "--method", "scgpt", "--reference", ref, "--fitted", model, "--dry-run", cwd=ws).returncode, 2)
+        self.assertEqual(self.sb.run("transfer", "--method", "pca", "--reference", ref, "--dry-run", cwd=ws).returncode, 2)
+
     def test_dev_checkout_mode_omits_duplicate_config(self):
         # workspace == pipeline dir: Nextflow auto-loads <pipeline>/nextflow.config, so no -c
         r = self.sb.run("init", self.sb.pipeline, "--runtime", "apptainer")

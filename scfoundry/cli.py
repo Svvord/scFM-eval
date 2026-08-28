@@ -43,7 +43,7 @@ CONTAINER_RUNTIMES = ("apptainer", "singularity", "docker")
 TASKS = OrderedDict([
     ("download",  dict(help="Download pretrained model checkpoints", implemented=True)),
     ("embed",     dict(help="Zero-shot cell embeddings", implemented=True)),
-    ("fewshot",   dict(help="Few-shot prototype fitting / label inference", implemented=False)),
+    ("transfer",  dict(help="Label transfer with frozen embeddings (prototype / knn / logreg / mlp)", implemented=True)),
     ("finetune",  dict(help="Fine-tuning / label prediction", implemented=False)),
     ("benchmark", dict(help="Score embeddings (cell-type conservation, batch mixing)", implemented=False)),
 ])
@@ -52,7 +52,7 @@ TASKS = OrderedDict([
 OUTDIR_PARAMS = {
     "download": [],
     "embed": ["emb_results_dir"],
-    "fewshot": ["emb_results_dir", "fewshot_results_dir"],
+    "transfer": ["emb_results_dir", "transfer_results_dir"],
     "finetune": ["emb_results_dir", "finetune_results_dir"],
     "benchmark": ["results_dir"],
 }
@@ -545,6 +545,43 @@ def cmd_embed(args, registry, extra):
     return launch("embed", method, input_id(data), params, args, extra)
 
 
+TRANSFER_CLASSIFIERS = ("prototype", "knn", "logreg", "mlp")
+
+
+def cmd_transfer(args, registry, extra):
+    method = require_method(registry, "transfer", args.method)
+    if not args.reference and not args.query:
+        die("provide --reference (fit), --reference and --query (fit + predict), or --query with --fitted (predict)")
+    if args.query and not args.reference and not args.fitted:
+        die("--query without --reference needs --fitted <model_dir>")
+    if args.reference and args.fitted:
+        die("--fitted cannot be combined with --reference")
+    params = OrderedDict()
+    for key in ("reference", "query"):
+        val = getattr(args, key)
+        if val:
+            path = os.path.realpath(val)
+            if not os.path.isfile(path):
+                die("{} file not found: {}".format(key, val))
+            params[key] = path
+    if args.fitted:
+        fitted = os.path.realpath(args.fitted)
+        if not os.path.isfile(os.path.join(fitted, "meta.json")):
+            die("--fitted must be a transfer model directory containing meta.json: {}".format(args.fitted))
+        params["fitted"] = fitted
+    params["classifier"] = args.classifier
+    if args.label_key:
+        params["label_key"] = args.label_key
+    if args.model:
+        params["model"] = args.model
+    if args.batch_size is not None:
+        params["batch_size"] = args.batch_size
+    if args.knn_k is not None:
+        params["knn_k"] = args.knn_k
+    inp = input_id(args.query or args.reference)
+    return launch("transfer", method, inp, params, args, extra)
+
+
 def cmd_list(args, registry):
     if args.what == "tasks":
         print("{:<11} {:<12} {}".format("task", "status", "description"))
@@ -672,6 +709,24 @@ def build_parser():
                         "(default: batch_id; a missing column is treated as a single batch)")
     add_task_options(p)
 
+    p = sub.add_parser("transfer", help=TASKS["transfer"]["help"],
+                       description="Label transfer with frozen embeddings: embed the reference and query with a "
+                                   "pretrained model, fit a lightweight classifier on the reference labels and "
+                                   "predict the query. No model parameters are updated (few-shot when the "
+                                   "reference is tiny). Outputs: <outdir>/transfer/models/<method>/<classifier>/"
+                                   "<ref-id>/ and <outdir>/transfer/predictions/<method>/<classifier>/<query-id>_predicted_*.tsv")
+    p.add_argument("--method", required=True, help="embedding method (see 'list methods --task transfer')")
+    p.add_argument("--reference", metavar="H5AD", help="labelled reference cells (fit)")
+    p.add_argument("--query", metavar="H5AD", help="cells to label (predict)")
+    p.add_argument("--fitted", metavar="DIR", help="previously fitted model directory (predict without --reference)")
+    p.add_argument("--classifier", choices=TRANSFER_CLASSIFIERS, default="logreg",
+                   help="classifier on the frozen embeddings (default: logreg)")
+    p.add_argument("--label-key", default="cell_type", help="obs column with reference labels (default: cell_type)")
+    p.add_argument("--knn-k", type=int, help="neighbours for --classifier knn (default: 15)")
+    p.add_argument("--model", help="model variant under data/model_weights (default: the method's default)")
+    p.add_argument("--batch-size", type=int, help="embedding batch size (default: the method's default)")
+    add_task_options(p)
+
     p = sub.add_parser("list", help="list methods or tasks")
     p.add_argument("what", choices=["methods", "tasks"])
     p.add_argument("--task", help="only methods supporting this task")
@@ -717,6 +772,8 @@ def main(argv=None):
         return cmd_download(args, registry, extra_nf_args)
     if args.command == "embed":
         return cmd_embed(args, registry, extra_nf_args)
+    if args.command == "transfer":
+        return cmd_transfer(args, registry, extra_nf_args)
     parser.error("unknown command {}".format(args.command))
 
 
