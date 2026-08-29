@@ -133,7 +133,7 @@ workflow embed_by_sccello {
 
 
 params.finetune_epoch        = 20
-params.finetune_eval_size    = 0.1
+params.finetune_eval_size    = 0.2
 params.finetune_batch_size   = 24   // official scCello probing batch size
 params.predict_batch_size    = 64
 params.finetune_results_dir  = ""

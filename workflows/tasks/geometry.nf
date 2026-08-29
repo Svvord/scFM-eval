@@ -68,8 +68,11 @@ workflow GEOMETRY {
     if( !params.embedding || !params.data )
         error "Usage: scfoundry geometry --embedding <file.h5ad | directory | glob> --data <input file.h5ad | directory> [--method NAME] [--label-key cell_type] [--batch-key batch_id]"
 
-    def emb_files = Channel.fromPath(resolve_h5ad(params.embedding.toString()), checkIfExists: true).collect()
-    def data_files = Channel.fromPath(resolve_h5ad(params.data.toString()), checkIfExists: true).collect()
+    // Wrap each collected list in a one-element list: `combine` flattens list items
+    // into the emitted tuple, so with several files the closure would otherwise
+    // receive one argument per file instead of two lists.
+    def emb_files = Channel.fromPath(resolve_h5ad(params.embedding.toString()), checkIfExists: true).collect().map { [it] }
+    def data_files = Channel.fromPath(resolve_h5ad(params.data.toString()), checkIfExists: true).collect().map { [it] }
     def inputs = emb_files.combine(data_files).map { emb, data ->
         def label = params.method ?: file(emb[0]).parent.name
         tuple(label.toString(), emb, data)

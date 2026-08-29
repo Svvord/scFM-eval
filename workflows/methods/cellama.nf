@@ -47,7 +47,7 @@ process embed_by_cellama {
 
 
 
-params.finetune_epoch        = 1
+params.finetune_epoch        = 20
 // params.finetune_eval_size = 0.1  无效, 但实际上是 0.1
 params.finetune_batch_size   = 32   
 params.finetune_results_dir  = ""

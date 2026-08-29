@@ -71,7 +71,7 @@ process embed_by_cellplm {
 
 
 params.finetune_epoch        = 2000   // deafult: 2000
-params.finetune_eval_size    = 0.1
+params.finetune_eval_size    = 0.2
 // params.cellplm_finetune_batch_size   = 32   // 没有意义
 // params.cellplm_predict_batch_size    = 64   // 没有意义
 params.finetune_results_dir  = ""

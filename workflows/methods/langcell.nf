@@ -193,7 +193,7 @@ workflow embed_by_langcell {
 
 params.finetune_batch_size = 16   // official LangCell annotation batch size
 params.finetune_epoch = 20   // official LangCell annotation epochs
-params.finetune_eval_size = 0.33
+params.finetune_eval_size = 0.2
 params.predict_batch_size = 16
 params.finetune_results_dir  = ""
 
