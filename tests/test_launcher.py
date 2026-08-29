@@ -259,6 +259,19 @@ class CommandLineTests(unittest.TestCase):
         self.assertEqual((params["method"], params["metrics"], params["batch_key"], params["clustering"]), ("scgpt", "all", "donor", "kmeans"))
         self.assertEqual(self.sb.run("benchmark", "--embedding", os.path.join(ws, "nope.h5ad"), "--dry-run", cwd=ws).returncode, 2)
 
+    def test_geometry_inputs(self):
+        ws = os.path.join(self.sb.dir, "ws")
+        self.sb.run("init", ws, "--runtime", "apptainer")
+        emb_dir = os.path.join(ws, "results", "embeddings", "scgpt"); os.makedirs(emb_dir)
+        emb = os.path.join(emb_dir, "colon.h5ad"); open(emb, "w").close()
+        data = os.path.join(ws, "colon.h5ad"); open(data, "w").close()
+        r = self.sb.run("geometry", "--embedding", emb, "--data", data, "--seed", "7", "--dry-run", cwd=ws)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        params = json.loads(r.stdout.split("params.json:")[1].split("command (")[0])
+        self.assertEqual((params["method"], params["batch_key"], params["seed"]), ("scgpt", "batch_id", 7))
+        self.assertEqual(params["data"], os.path.realpath(data))
+        self.assertEqual(self.sb.run("geometry", "--embedding", emb, "--data", os.path.join(ws, "nope.h5ad"), "--dry-run", cwd=ws).returncode, 2)
+
     def test_dev_checkout_mode_omits_duplicate_config(self):
         # workspace == pipeline dir: Nextflow auto-loads <pipeline>/nextflow.config, so no -c
         r = self.sb.run("init", self.sb.pipeline, "--runtime", "apptainer")

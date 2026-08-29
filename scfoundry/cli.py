@@ -46,6 +46,7 @@ TASKS = OrderedDict([
     ("transfer",  dict(help="Label transfer with frozen embeddings (prototype / knn / logreg / mlp)", implemented=True)),
     ("finetune",  dict(help="Supervised fine-tuning (parameter updates) / prediction", implemented=True)),
     ("benchmark", dict(help="Score embeddings (biological conservation, batch mixing)", implemented=True)),
+    ("geometry",  dict(help="Representation-geometry probes of embeddings", implemented=True)),
 ])
 
 # Nextflow parameters that receive --outdir, per task (all set to the same path).
@@ -55,6 +56,7 @@ OUTDIR_PARAMS = {
     "transfer": ["emb_results_dir", "transfer_results_dir"],
     "finetune": ["emb_results_dir", "finetune_results_dir"],
     "benchmark": ["results_dir"],
+    "geometry": ["results_dir"],
 }
 
 
@@ -639,6 +641,32 @@ def cmd_benchmark(args, extra):
     return launch("benchmark", safe_id(label), inp, params, args, extra)
 
 
+def resolve_embedding_spec(spec, method_override):
+    """Return (absolute spec, method label, input id) for a file / directory / glob spec."""
+    path = os.path.realpath(spec)
+    if os.path.isdir(path):
+        return path, method_override or os.path.basename(path.rstrip("/")), os.path.basename(path.rstrip("/"))
+    if os.path.isfile(path):
+        return path, method_override or os.path.basename(os.path.dirname(path)), input_id(path)
+    if any(ch in spec for ch in "*?["):
+        return path, method_override or os.path.basename(os.path.dirname(path)), safe_id(os.path.basename(os.path.dirname(path)) or "glob")
+    die("path not found: {}".format(spec))
+
+
+def cmd_geometry(args, extra):
+    emb, label, inp = resolve_embedding_spec(args.embedding, args.method)
+    data = os.path.realpath(args.data)
+    if not (os.path.isfile(data) or os.path.isdir(data) or any(ch in args.data for ch in "*?[")):
+        die("input data path not found: {}".format(args.data))
+    params = OrderedDict([("embedding", emb), ("data", data if not any(ch in args.data for ch in "*?[") else args.data),
+                          ("label_key", args.label_key), ("batch_key", args.batch_key)])
+    if args.max_cells is not None:
+        params["max_cells"] = args.max_cells
+    if args.seed is not None:
+        params["seed"] = args.seed
+    return launch("geometry", safe_id(label), inp, params, args, extra)
+
+
 def cmd_list(args, registry):
     if args.what == "tasks":
         print("{:<11} {:<12} {}".format("task", "status", "description"))
@@ -815,6 +843,21 @@ def build_parser():
     p.add_argument("--batch-max-cells", type=int, help="stratified subsample size for the batch metrics (default 0 = all cells)")
     add_task_options(p)
 
+    p = sub.add_parser("geometry", help=TASKS["geometry"]["help"],
+                       description="Representation-geometry probes for embedding files produced by `embed`, each paired "
+                                   "with the raw-count input it came from: participation ratio, spectral and cell-pair "
+                                   "anisotropy, within-batch expression-neighbourhood preservation (R_NX), TwoNN "
+                                   "intrinsic dimension and cell-type / batch partial eta-squared. Output: "
+                                   "<outdir>/geometry/<method>/ and <outdir>/<method>_geometry.csv.")
+    p.add_argument("--embedding", required=True, metavar="PATH", help="embedding .h5ad, a directory of them, or a glob")
+    p.add_argument("--data", required=True, metavar="PATH", help="the raw-count input .h5ad (or a directory; matched to embeddings by file name)")
+    p.add_argument("--method", help="method label written into the tables (default: the embedding directory name)")
+    p.add_argument("--label-key", default="cell_type", help="obs column with cell-type labels (default: cell_type)")
+    p.add_argument("--batch-key", default="batch_id", help="obs column with batch labels (default: batch_id; a missing column means one batch)")
+    p.add_argument("--max-cells", type=int, help="subsample datasets larger than this (default 20000)")
+    p.add_argument("--seed", type=int, help="seed for subsampling and pair sampling (default 0)")
+    add_task_options(p)
+
     p = sub.add_parser("list", help="list methods or tasks")
     p.add_argument("what", choices=["methods", "tasks"])
     p.add_argument("--task", help="only methods supporting this task")
@@ -866,6 +909,8 @@ def main(argv=None):
         return cmd_finetune(args, registry, extra_nf_args)
     if args.command == "benchmark":
         return cmd_benchmark(args, extra_nf_args)
+    if args.command == "geometry":
+        return cmd_geometry(args, extra_nf_args)
     parser.error("unknown command {}".format(args.command))
 
 

@@ -20,6 +20,7 @@ include { EMBED } from './workflows/tasks/embed'
 include { TRANSFER } from './workflows/tasks/transfer'
 include { FINETUNE } from './workflows/tasks/finetune'
 include { BENCHMARK } from './workflows/tasks/benchmark'
+include { GEOMETRY } from './workflows/tasks/geometry'
 
 workflow {
     def tasks = [
@@ -28,6 +29,7 @@ workflow {
         'transfer': { TRANSFER() },
         'finetune': { FINETUNE() },
         'benchmark': { BENCHMARK() },
+        'geometry':  { GEOMETRY() },
     ]
 
     def selected = params.task ? params.task.toString().trim().toLowerCase() : null
