@@ -45,7 +45,7 @@ TASKS = OrderedDict([
     ("embed",     dict(help="Zero-shot cell embeddings", implemented=True)),
     ("transfer",  dict(help="Label transfer with frozen embeddings (prototype / knn / logreg / mlp)", implemented=True)),
     ("finetune",  dict(help="Supervised fine-tuning (parameter updates) / prediction", implemented=True)),
-    ("benchmark", dict(help="Score embeddings (cell-type conservation, batch mixing)", implemented=False)),
+    ("benchmark", dict(help="Score embeddings (biological conservation, batch mixing)", implemented=True)),
 ])
 
 # Nextflow parameters that receive --outdir, per task (all set to the same path).
@@ -614,6 +614,31 @@ def cmd_finetune(args, registry, extra):
     return launch("finetune", method, inp, params, args, extra)
 
 
+def cmd_benchmark(args, extra):
+    spec = args.embedding
+    path = os.path.realpath(spec)
+    if os.path.isdir(path):
+        label = args.method or os.path.basename(path.rstrip("/"))
+        inp = os.path.basename(path.rstrip("/"))
+    elif os.path.isfile(path):
+        label = args.method or os.path.basename(os.path.dirname(path))
+        inp = input_id(path)
+    elif any(ch in spec for ch in "*?["):
+        label = args.method or os.path.basename(os.path.dirname(path))
+        inp = safe_id(os.path.basename(os.path.dirname(path)) or "glob")
+    else:
+        die("embedding path not found: {}".format(spec))
+    metrics = args.metrics or ("all" if args.batch_key else "bio")
+    params = OrderedDict([
+        ("embedding", path), ("label_key", args.label_key), ("metrics", metrics), ("clustering", args.clustering),
+    ])
+    if args.batch_key:
+        params["batch_key"] = args.batch_key
+    if args.batch_max_cells is not None:
+        params["batch_max_cells"] = args.batch_max_cells
+    return launch("benchmark", safe_id(label), inp, params, args, extra)
+
+
 def cmd_list(args, registry):
     if args.what == "tasks":
         print("{:<11} {:<12} {}".format("task", "status", "description"))
@@ -775,6 +800,21 @@ def build_parser():
     p.add_argument("--model", help="pretrained model variant under data/model_weights (default: the method's default)")
     add_task_options(p)
 
+    p = sub.add_parser("benchmark", help=TASKS["benchmark"]["help"],
+                       description="Score embedding files produced by `embed`: biological conservation on the "
+                                   "cell-type labels (NMI, HOM, COM, FMI, ARI on Leiden/KMeans clusters; ASW, cLISI, "
+                                   "Acc@kNN, graph connectivity) and, with --batch-key, batch mixing (kBET, BRAS, "
+                                   "iLISI, CiLISI). Output: <outdir>/benchmark/ (per-sample tables, cluster labels, "
+                                   "<method>_*_metrics_{long,wide}.csv).")
+    p.add_argument("--embedding", required=True, metavar="PATH", help="embedding .h5ad, a directory of them, or a glob")
+    p.add_argument("--method", help="method label written into the tables (default: the directory name)")
+    p.add_argument("--label-key", default="cell_type", help="obs column with cell-type labels (default: cell_type)")
+    p.add_argument("--batch-key", metavar="OBS_COLUMN", help="obs column with batch labels; enables the batch metrics")
+    p.add_argument("--metrics", choices=("bio", "batch", "all"), help="metric set (default: all if --batch-key is given, else bio)")
+    p.add_argument("--clustering", choices=("leiden", "kmeans"), default="leiden", help="clustering for the label-agreement metrics (default: leiden)")
+    p.add_argument("--batch-max-cells", type=int, help="stratified subsample size for the batch metrics (default 0 = all cells)")
+    add_task_options(p)
+
     p = sub.add_parser("list", help="list methods or tasks")
     p.add_argument("what", choices=["methods", "tasks"])
     p.add_argument("--task", help="only methods supporting this task")
@@ -824,6 +864,8 @@ def main(argv=None):
         return cmd_transfer(args, registry, extra_nf_args)
     if args.command == "finetune":
         return cmd_finetune(args, registry, extra_nf_args)
+    if args.command == "benchmark":
+        return cmd_benchmark(args, extra_nf_args)
     parser.error("unknown command {}".format(args.command))
 
 
