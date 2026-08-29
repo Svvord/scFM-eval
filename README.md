@@ -1,435 +1,78 @@
+# scFoundry
 
-# scFM-eval
+**scFoundry** is a unified, reproducible framework for **deploying, running and evaluating single-cell foundation models (scFMs)**. One command gives you zero-shot embeddings, label transfer on frozen embeddings, supervised fine-tuning, the benchmark metrics of our paper, or representation-geometry probes — for any supported model, in its original container, with its authors' recipe. No per-model environment setup, no code.
 
-**scFM-eval** is a unified, reproducible computational framework for deploying,  running, and evaluating **single-cell foundation models (scFMs)**.  
-It is built on **Nextflow DSL2** and provides standardized execution, containerized environments, and automated embedding inference across multiple scFM methods.
+It is built on **Nextflow**: every model runs in a pinned container, every launch is recorded, and the same commands work on a workstation with Docker or on an HPC cluster with Apptainer/Singularity. This repository is the home of scFoundry and of the benchmark described in the accompanying paper.
 
-**[2026.03.04]** We released the fine-tuning implementation, primarily designed for data with discrete labels.
+📖 **Documentation: <https://svvord.github.io/scFM-eval-docs/>** — installation, tutorials, the reference for every task and method, and the benchmark results with an interactive explorer.
 
-**[2026.01.13]** We released the few-shot learning implementation, primarily designed for data with discrete labels, and fixed several minor bugs in **scPRINT** deployment.
-
----
-
-## System Requirements
-
-- **OS**: Linux (`linux/amd64`)
-- **GPU**: NVIDIA GPU required  
-  - NVIDIA driver ≥ **525**
-- **Container runtime**:
-  - `Docker` **or**
-  - `Apptainer` (formerly Singularity)
-- **Nextflow**:
-  - Tested with `Nextflow ≥ 25.10.0`
-  - Any version supporting **DSL2** should work
+**[2026.08]** scFoundry 0.2: `pip`-installable `scfoundry` command with workspaces; `embed` covers the scFMs, PCA, scVI and the batch-integration methods; new `transfer` task (prototype / kNN / logistic regression / MLP on frozen embeddings); `finetune` restricted to methods that update parameters; new `benchmark` and `geometry` tasks (the manuscript's metrics and representation-geometry probes); revised CellFM, Geneformer, scFoundation, SCimilarity and scPRINT implementations.
+**[2026.03.04]** Fine-tuning implementation released.
+**[2026.01.13]** Few-shot learning implementation released; scPRINT deployment fixes.
 
 ---
+
+## Requirements
+
+| Requirement | Notes |
+|---|---|
+| Linux `x86_64` | |
+| **Python ≥ 3.7** | for the `scfoundry` command only; standard library |
+| **Nextflow ≥ 24.10** | https://www.nextflow.io/docs/latest/install.html (needs Java 17+) |
+| **Apptainer**, **Singularity** or **Docker** | models run in pinned containers |
+| NVIDIA driver ≥ 525 | for tasks that run a model on the GPU |
 
 ## Installation
 
-### 1. Install Nextflow
+```bash
+pip install scfoundry                                       # release (PyPI)
+pip install git+https://github.com/Svvord/scFM-eval.git     # latest from GitHub
+```
 
-Please follow the official instructions:  
-👉 https://github.com/nextflow-io/nextflow
+Install into the environment that provides `nextflow`. Full instructions, including the developer install: [Installation](https://svvord.github.io/scFM-eval-docs/getting-started/installation.html).
 
-After installation, verify:
+## Quick start
 
 ```bash
-nextflow -v
+scfoundry init my_project && cd my_project    # workspace: nextflow.config, data/, cache/, results/, runs/
+scfoundry download --method scgpt             # official checkpoint -> data/model_weights/
+scfoundry embed --method scgpt --data cells.h5ad
+# -> results/embeddings/scgpt/cells.h5ad   (embedding in adata.X, original obs kept)
 ```
 
-### 2. Download scFM-eval
-```bash
-git clone https://github.com/Svvord/scFM-eval.git
-```
+Input is an AnnData `.h5ad` with **raw counts over the full transcriptome**; see [Input data format](https://svvord.github.io/scFM-eval-docs/data/input-format.html). Four demo files under [`data/demo/`](data/demo) satisfy the contract; the [Quickstart](https://svvord.github.io/scFM-eval-docs/getting-started/quickstart.html) embeds, scores and annotates them end to end.
 
----
+## Tasks
 
-## First-Time Setup (Required Once)
+| Task | What it does | Guide |
+|---|---|---|
+| `download` | fetch a model's official checkpoint | [Model weights](https://svvord.github.io/scFM-eval-docs/getting-started/model-weights.html) |
+| `embed` | cell embeddings: zero-shot scFMs, PCA / scVI references, batch-integration methods | [Embed](https://svvord.github.io/scFM-eval-docs/tasks/embed.html) |
+| `transfer` | label a query from a labelled reference on frozen embeddings (logreg / prototype / kNN / MLP) | [Transfer](https://svvord.github.io/scFM-eval-docs/tasks/transfer.html) |
+| `finetune` | update a model's parameters with its authors' recipe, then predict | [Fine-tune](https://svvord.github.io/scFM-eval-docs/tasks/finetune.html) |
+| `benchmark` | the paper's 13 metrics: biological conservation and batch mixing | [Benchmark](https://svvord.github.io/scFM-eval-docs/tasks/benchmark.html) |
+| `geometry` | representation-geometry probes: effective dimension, anisotropy, R_NX, intrinsic dimension, partial η² | [Geometry](https://svvord.github.io/scFM-eval-docs/tasks/geometry.html) |
 
-### Step 1. Choose Your Container Backend
+`scfoundry list methods` prints the method × task matrix; `scfoundry <task> --help` the options of a task.
 
-Open `nextflow.config` and select **one** container runtime:
+## Supported methods
 
-* **Apptainer**
-  (Default; no changes needed unless you modified it before)
+Zero-shot scFMs: **Cell2Sentence, CELLama, CellFM, CellPLM, Geneformer, GenePT, LangCell, scBERT, scCello, scFoundation, scGPT, SCimilarity, scPRINT, UCE**, and **Novae** for spatial data. References: **PCA**, **scVI** (CELLxGENE Census). Integration: **scGPT (integrated), scVI (de novo), Harmony, Seurat CCA, Seurat RPCA**.
 
-* **Singularity**
-```groovy
-singularity {
-    enabled = true
-    ...
-}
-docker {
-    enabled = false
-    ...
-}
-apptainer {
-    enabled = false
-    ...
-}
-```
+Containers, pinned versions, default checkpoints and per-method parameters: [Supported methods](https://svvord.github.io/scFM-eval-docs/reference/methods.html).
 
-* **Docker**
+## Benchmark results
 
-```groovy
-docker {
-    enabled = true
-    ...
-}
-apptainer {
-    enabled = false
-    ...
-}
-singularity {
-    enabled = false
-    ...
-}
-```
-
-
-> ⚠️ This only needs to be done **once**.
-> Subsequent runs require no further configuration.
-
----
-
-### Step 2. Download Model Checkpoints
-
-Pretrained model weights must be downloaded **once** before first use.
-
-We provide a helper script `download_model_weights.nf` to fetch official checkpoints and place them in the correct directory structure.
-
-#### Example: Download weights for **scGPT**
-
-```bash
-nextflow download_model_weights.nf --method scgpt
-```
-
-📌 **Important notes**:
-
-* You only need to download model weights **once**
-* Downloaded weights are cached locally and reused automatically
-* You may also manually place weights if you follow the same directory structure
-
-#### Directory Structure Example (scGPT)
-
-```text
-data/
-└── model_weights/
-    └── scGPT/
-        └── scGPT_human/
-```
-
-* The default scGPT version is `scGPT_human`
-* To specify this version explicitly in later runs:
-
-```text
---model "scGPT/scGPT_human"
-```
-
-* If no version is specified, the framework will use the **default pretrained model**
-
----
-### Step 3. Input Data Preparation
-
-`scFM-eval` accepts **AnnData (`.h5ad`) files** as the standard input format.
-
-#### Required Data Format
-
-- **Expression matrix**:
-  - Raw **count matrix** (not log-normalized)
-  - Stored in `adata.X`
-  - Must contain the **full transcriptome**
-    - Do **not** subset to highly variable genes (HVGs)
-
-- **Gene metadata (`adata.var`)**:
-  - `var.index` **should primarily use HGNC gene symbols**
-    - This is required for the majority of genes
-  - **Genes without an official HGNC symbol**:
-    - May use their **Ensembl gene ID as a fallback identifier**
-    - This ensures all genes remain represented with a valid token
-    - Most scFM methods rely on token-based gene matching and can accommodate this behavior
-  - Required columns:
-    - `gene_symbol`: gene identifier used by the model
-      - HGNC gene symbol when available
-      - Ensembl gene ID used as a fallback when no HGNC symbol exists
-    - `ensembl_id`: corresponding Ensembl gene ID
-
-- **Cell metadata (`adata.obs`)**:
-  - Must contain a column named:
-    - `barcode`: unique cell barcode identifier
-  - In most cases, `barcode` can be a copy of `adata.obs_names`
-  - **All cell identifiers must be unique**
-    - If needed, ensure uniqueness by calling:
-      ```python
-      adata.obs_names_make_unique()
-      ```
-    - Then populate:
-      ```python
-      adata.obs["barcode"] = adata.obs_names
-      ```
-
----
-
-### Data Preprocessing Policy
-
-`scFM-eval` performs **minimal preprocessing by design**.
-
-- Users are expected to perform **their own data quality control (QC)** prior to input,  
-  such as:
-  - Filtering low-quality cells
-  - Doublet removal (optional)
-
-- **Do NOT perform HVG selection**
-  - All scFM methods in this framework expect the **full gene expression profile**
-  - Subsetting to HVGs may lead to:
-    - Incompatible model inputs
-    - Silent gene dropping
-    - Degraded or misleading embeddings
-
-- Input data must preserve **raw counts across the full transcriptome**
-
-Please refer to the provided example dataset:
-```text
-data/demo/colon_1000.h5ad
-```
-
----
-## First Run Notes (Important)
-
-* On the **first execution of a method**, Nextflow will automatically:
-
-  * Pull the corresponding container image
-  * Cache the image and model weights locally
-* This initial run may take longer
-* **No additional setup is needed** once caching is complete
-
----
-
-## Embedding Inference (Zero-shot)
-
-Embedding inference can be performed with **a single command**.
-
-We provide a small demo dataset:
-
-```text
-data/demo/colon_1000.h5ad
-```
-
-### Example Command
-
-```bash
-nextflow embed_by_scfm.nf \
-  --method scgpt \
-  --data data/demo/colon_1000.h5ad
-```
-
-Required arguments:
-
-* `--method`: scFM method name (e.g. `scgpt`)
-* `--data`: input dataset in `.h5ad` format
-
-### Output
-
-Results are written to:
-
-```text
-results/embedding/<method_name>/
-```
-
-* Embeddings are stored as `.h5ad` files
-* The embedding matrix can be accessed via:
-
-```python
-adata = sc.read_h5ad("results/embedding/scgpt/colon_1000.h5ad")
-embeddings = adata.X
-```
-
----
-
-## Few-shot Learning
-
-Few-shot learning and label inference can be performed with **a single command**.
-
-We provide a small demo dataset consisting of a **support set** and a **query set**:
-
-```text
-data/demo/liver_1shot_support.h5ad
-data/demo/liver_1shot_query.h5ad
-```
-
-### Step 1: Fit Prototypes (Support Set)
-
-To fit class prototypes, set the mode to `fit` and provide the support dataset.
-
-```bash
-nextflow fewshot_by_scfm.nf \
-  --method scgpt \
-  --mode fit \
-  --support data/demo/liver_1shot_support.h5ad
-```
-
-This will generate a prototype file (`.npz`) saved to:
-
-```text
-results/fewshot/fitted_prototypes/<method_name>/
-```
-
-The generated `.npz` file contains the fitted class prototypes derived from the support set.
-
-
-### Step 2: Infer Labels (Query Set)
-
-To infer labels for a query dataset using the fitted prototypes, set the mode to `infer` and provide:
-
-* the query dataset
-* the path to the fitted prototype file
-
-```bash
-nextflow fewshot_by_scfm.nf \
-  --method scgpt \
-  --mode infer \
-  --query data/demo/liver_1shot_query.h5ad \
-  --fitted results/fewshot/fitted_prototypes/scgpt/liver_1shot_support.npz
-```
-
-Inference results are written to:
-
-```text
-results/fewshot/inference/<method_name>/
-```
-
-### One-step Fit + Inference
-
-You can also provide both the support and query datasets in a **single command**, which will automatically perform prototype fitting followed by inference:
-
-```bash
-nextflow fewshot_by_scfm.nf \
-  --method scgpt \
-  --support data/demo/liver_1shot_support.h5ad \
-  --query data/demo/liver_1shot_query.h5ad
-```
-
-### Notes
-
-* Few-shot learning is designed for datasets with **discrete label types**
-* The support dataset must contain ground-truth labels
-* The query dataset does not require labels and will be annotated during inference
-* By default, labels are read from `adata.obs['cell_type']`; this can be overridden using the `--label_key` option
----
-
-## Fine-tuning
-
-Fine-tuning and label prediction can also be performed with **a single command**.
-
-In the example below, we reuse `colon_1000.h5ad` as the training dataset. It contains cell-type labels in `adata.obs['cell_type']`. We also provide `colon_50.h5ad` as a small test dataset.
-
-```text
-data/demo/colon_1000.h5ad
-data/demo/colon_50.h5ad
-```
-
-### Step 1: Fine-tune Model
-
-To fine-tune a model, set the mode to `fit` and provide the training dataset.
-
-```bash
-nextflow finetune_by_scfm.nf \
-  --method scgpt \
-  --mode fit \
-  --train data/demo/colon_1000.h5ad
-```
-
-The fine-tuned model weights will be provided via a symlink and are saved by default to:
-
-```text
-results/finetune/finetuned_models/<method_name>/<train_data_id>/
-```
-You can then use this fine-tuned model for label prediction.
-
-### Step 2: Predict labels
-To predict labels, set the mode to `pred` and provide:
-- the directory containing the fine-tuned weights
-- the test dataset
-
-```bash
-nextflow finetune_by_scfm.nf \
-  --method scgpt \
-  --mode pred \
-  --fitted results/finetune/finetuned_models/scGPT/colon_1000 \
-  --test data/demo/colon_50.h5ad 
-```
-Prediction results are written to:
-```
-results/finetune/prediction/<method_name>/
-```
-
-### One-step Fine-tune + Predict
-You can also provide both the training and test datasets in a single command, which will automatically perform fine-tuning followed by prediction:
-
-```bash
-nextflow finetune_by_scfm.nf \
-  --method scgpt \
-  --train data/demo/colon_1000.h5ad \
-  --test data/demo/colon_50.h5ad
-```
-
-### Notes
-
-1. Some methods only support **zero-shot embeddings**. For these methods, we attach a task-agnostic post-hoc classifier, and the fine-tuning process actually optimizes this appended model. If the fine-tuned weight directory contains **only** a `posthoc_classifier/` folder, then `--fitted` should point to: `results/finetune/finetuned_models/<method_name>/<train_data_id>/posthoc_classifier/`. **CELLama is a special case**: it supports fine-tuning the backbone model but does not support native prediction/training in our pipeline. Therefore, we fine-tune both the backbone and the post-hoc classifier. In this case, you should still pass the same `--fitted` directory as in the scGPT example above, even though it may also contain a `posthoc_classifier/` folder.
-
-2. By default, labels are read from `adata.obs["cell_type"]`. Any **discrete** label field can be used in this workflow. To specify the label column, use `--finetune_label_key`.
-
-3. You can adjust the number of fine-tuning epochs and the training batch size depending on your GPU resources using: `--finetune_epoch` and `--finetune_batch_size`. We provide method-specific default `finetune_epoch` values (based on the original authors' fine-tuning recipes), so we generally do not recommend changing them unless you have a clear purpose.
-
-
-
-
-## Supported Methods & Environments
-
-| Method | Container | Model Version | Notes |
-| ------ | --------- | ------------- | ----- |
-| Cell2Sentence (C2S)| [housy17/c2s:latest](https://hub.docker.com/repository/docker/housy17/c2s/general) | [v1.2.0](https://github.com/vandijklab/cell2sentence) |New method (zero/few-shot done; fine-tune pending)|
-| CELLama | [housy17/cellama:latest](https://hub.docker.com/repository/docker/housy17/cellama/general) | [v0.1.0](https://github.com/portrai-io/CELLama) |       |
-| CellFM | [housy17/cellfm:latest](https://hub.docker.com/repository/docker/housy17/cellfm/general) | [5054a2a](https://github.com/biomed-AI/CellFM-torch) |       |
-| CellPLM | [housy17/cellplm:latest](https://hub.docker.com/repository/docker/housy17/cellplm/general) | [v0.1.0](https://github.com/OmicsML/CellPLM) |       |
-| Geneformer | [housy17/geneformer:latest](https://hub.docker.com/repository/docker/housy17/geneformer/general) | [v0.1.0](https://huggingface.co/ctheodoris/Geneformer) |       |
-| GenePT | [housy17/genept:latest](https://hub.docker.com/repository/docker/housy17/genept/general) | [3602699](https://github.com/yiqunchen/GenePT) |       |
-| LangCell | [housy17/langcell:latest](https://hub.docker.com/repository/docker/housy17/langcell) | [69e41ef](https://github.com/PharMolix/LangCell) |       |
-| scBERT | [housy17/scbert:latest](https://hub.docker.com/repository/docker/housy17/scbert/general) | [v1.0.0](https://github.com/TencentAILabHealthcare/scBERT) |       |
-| scCello | [housy17/sccello:latest](https://hub.docker.com/repository/docker/housy17/sccello/general) | [767585b](https://github.com/DeepGraphLearning/scCello) |       |
-| scFoundation | [housy17/scfoundation:latest](https://hub.docker.com/repository/docker/housy17/scfoundation/general) | [397631c](https://github.com/biomap-research/scFoundation) |       |
-| scGPT | [housy17/scgpt:latest](https://hub.docker.com/repository/docker/housy17/scgpt/general) | [v0.2.4](https://github.com/bowang-lab/scGPT) |       |
-| SCimilarity | [housy17/scsimilarity:latest](https://hub.docker.com/repository/docker/housy17/scsimilarity/general) | [v0.4.1](https://genentech.github.io/scimilarity/index.html) |       |
-| scPRINT | [housy17/scprint:latest](https://hub.docker.com/repository/docker/housy17/scprint/general) | [v2.3.5](https://github.com/cantinilab/scPRINT) |       |
-| UCE | [housy17/uce:latest](https://hub.docker.com/repository/docker/housy17/uce) | [8227a65](https://github.com/snap-stanford/UCE) |       |
-
-
-
-
-📌 *This table will be expanded as more models and configurations are added.*
-
----
-
-## Tutorials & Documentation
-
-A detailed tutorial covering:
-
-* Advanced parameters
-* Batch size and resource control
-* Few-shot workflows
-* Fine-tuning workflows
-* Benchmark evaluation
-
-👉 **Tutorial link: (coming soon)**
-
----
+Every method over 26 Tabula Sapiens v2 tissues (548,977 cells), with default settings throughout: [Benchmark results](https://svvord.github.io/scFM-eval-docs/results/) and the [interactive explorer](https://svvord.github.io/scFM-eval-docs/results/explorer.html). The tables are what `scfoundry benchmark` and `scfoundry geometry` compute, so your own numbers are directly comparable — see [Reproducing the paper](https://svvord.github.io/scFM-eval-docs/reproducing/).
 
 ## Citation
 
-If this framework or any of the tools provided here are useful for your research, **please cite our work** — it helps us a lot.
-> Siyu Hou, Penghui Yang, Wenjing Ma, Jade Xiaoqing Wang and Xiang Zhou (2026). 
+If scFoundry or the benchmark is useful for your research, please cite:
+
+> Siyu Hou, Penghui Yang, Wenjing Ma, Jade Xiaoqing Wang and Xiang Zhou (2026).
 > A unified framework enables accessible deployment and comprehensive benchmarking
 > of single-cell foundation models.
+
 ```
 @article{hou2026unified,
   title = {A unified framework enables accessible deployment and comprehensive benchmarking of single-cell foundation models},
@@ -439,3 +82,5 @@ If this framework or any of the tools provided here are useful for your research
   journal = {bioRxiv}
 }
 ```
+
+Please also cite the upstream paper of every model whose results you report — links on the [citation page](https://svvord.github.io/scFM-eval-docs/about/citation.html).
