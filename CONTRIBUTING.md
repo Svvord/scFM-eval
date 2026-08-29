@@ -13,8 +13,8 @@ the first public release is out. A method pull request must contain a `Dockerfil
 filled-in method card and demo evidence. The full checklist, the module contracts and the
 review criteria are in the documentation:
 
-- Adding a method: https://svvord.github.io/scFM-eval-docs/extending/new-method.html
-- Contributing a method: https://svvord.github.io/scFM-eval-docs/extending/contributing.html
+- Adding a method: https://svvord.github.io/scFoundry-docs/extending/new-method.html
+- Contributing a method: https://svvord.github.io/scFoundry-docs/extending/contributing.html
 
 Methods are reviewed against their authors' published recipe. A method that runs with its
 authors' defaults, from their official weights, in an image built from a committed

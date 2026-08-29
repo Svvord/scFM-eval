@@ -19,8 +19,8 @@ classifiers = [
 dependencies = []   # standard library only; Nextflow and a container runtime are external requirements
 
 [project.urls]
-Homepage = "https://github.com/Svvord/scFM-eval"
-Repository = "https://github.com/Svvord/scFM-eval"
+Homepage = "https://github.com/Svvord/scFoundry"
+Repository = "https://github.com/Svvord/scFoundry"
 
 [project.scripts]
 scfoundry = "scfoundry.cli:main"

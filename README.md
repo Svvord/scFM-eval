@@ -4,7 +4,7 @@
 
 It is built on **Nextflow**: every model runs in a pinned container, every launch is recorded, and the same commands work on a workstation with Docker or on an HPC cluster with Apptainer/Singularity. This repository is the home of scFoundry and of the benchmark described in the accompanying paper.
 
-📖 **Documentation: <https://svvord.github.io/scFM-eval-docs/>** — installation, tutorials, the reference for every task and method, and the benchmark results with an interactive explorer.
+📖 **Documentation: <https://svvord.github.io/scFoundry-docs/>** — installation, tutorials, the reference for every task and method, and the benchmark results with an interactive explorer.
 
 **[2026.08]** scFoundry 0.2: `pip`-installable `scfoundry` command with workspaces; `embed` covers the scFMs, PCA, scVI and the batch-integration methods; new `transfer` task (prototype / kNN / logistic regression / MLP on frozen embeddings); `finetune` restricted to methods that update parameters; new `benchmark` and `geometry` tasks (the manuscript's metrics and representation-geometry probes); revised CellFM, Geneformer, scFoundation, SCimilarity and scPRINT implementations.
 **[2026.03.04]** Fine-tuning implementation released.
@@ -26,10 +26,10 @@ It is built on **Nextflow**: every model runs in a pinned container, every launc
 
 ```bash
 pip install scfoundry                                       # release (PyPI)
-pip install git+https://github.com/Svvord/scFM-eval.git     # latest from GitHub
+pip install git+https://github.com/Svvord/scFoundry.git     # latest from GitHub
 ```
 
-Install into the environment that provides `nextflow`. Full instructions, including the developer install: [Installation](https://svvord.github.io/scFM-eval-docs/getting-started/installation.html).
+Install into the environment that provides `nextflow`. Full instructions, including the developer install: [Installation](https://svvord.github.io/scFoundry-docs/getting-started/installation.html).
 
 ## Quick start
 
@@ -40,18 +40,18 @@ scfoundry embed --method scgpt --data cells.h5ad
 # -> results/embeddings/scgpt/cells.h5ad   (embedding in adata.X, original obs kept)
 ```
 
-Input is an AnnData `.h5ad` with **raw counts over the full transcriptome**; see [Input data format](https://svvord.github.io/scFM-eval-docs/data/input-format.html). Four demo files under [`data/demo/`](data/demo) satisfy the contract; the [Quickstart](https://svvord.github.io/scFM-eval-docs/getting-started/quickstart.html) embeds, scores and annotates them end to end.
+Input is an AnnData `.h5ad` with **raw counts over the full transcriptome**; see [Input data format](https://svvord.github.io/scFoundry-docs/data/input-format.html). Four demo files under [`data/demo/`](data/demo) satisfy the contract; the [Quickstart](https://svvord.github.io/scFoundry-docs/getting-started/quickstart.html) embeds, scores and annotates them end to end.
 
 ## Tasks
 
 | Task | What it does | Guide |
 |---|---|---|
-| `download` | fetch a model's official checkpoint | [Model weights](https://svvord.github.io/scFM-eval-docs/getting-started/model-weights.html) |
-| `embed` | cell embeddings: zero-shot scFMs, PCA / scVI references, batch-integration methods | [Embed](https://svvord.github.io/scFM-eval-docs/tasks/embed.html) |
-| `transfer` | label a query from a labelled reference on frozen embeddings (logreg / prototype / kNN / MLP) | [Transfer](https://svvord.github.io/scFM-eval-docs/tasks/transfer.html) |
-| `finetune` | update a model's parameters with its authors' recipe, then predict | [Fine-tune](https://svvord.github.io/scFM-eval-docs/tasks/finetune.html) |
-| `benchmark` | the paper's 13 metrics: biological conservation and batch mixing | [Benchmark](https://svvord.github.io/scFM-eval-docs/tasks/benchmark.html) |
-| `geometry` | representation-geometry probes: effective dimension, anisotropy, R_NX, intrinsic dimension, partial η² | [Geometry](https://svvord.github.io/scFM-eval-docs/tasks/geometry.html) |
+| `download` | fetch a model's official checkpoint | [Model weights](https://svvord.github.io/scFoundry-docs/getting-started/model-weights.html) |
+| `embed` | cell embeddings: zero-shot scFMs, PCA / scVI references, batch-integration methods | [Embed](https://svvord.github.io/scFoundry-docs/tasks/embed.html) |
+| `transfer` | label a query from a labelled reference on frozen embeddings (logreg / prototype / kNN / MLP) | [Transfer](https://svvord.github.io/scFoundry-docs/tasks/transfer.html) |
+| `finetune` | update a model's parameters with its authors' recipe, then predict | [Fine-tune](https://svvord.github.io/scFoundry-docs/tasks/finetune.html) |
+| `benchmark` | the paper's 13 metrics: biological conservation and batch mixing | [Benchmark](https://svvord.github.io/scFoundry-docs/tasks/benchmark.html) |
+| `geometry` | representation-geometry probes: effective dimension, anisotropy, R_NX, intrinsic dimension, partial η² | [Geometry](https://svvord.github.io/scFoundry-docs/tasks/geometry.html) |
 
 `scfoundry list methods` prints the method × task matrix; `scfoundry <task> --help` the options of a task.
 
@@ -59,11 +59,11 @@ Input is an AnnData `.h5ad` with **raw counts over the full transcriptome**; see
 
 Zero-shot scFMs: **Cell2Sentence, CELLama, CellFM, CellPLM, Geneformer, GenePT, LangCell, scBERT, scCello, scFoundation, scGPT, SCimilarity, scPRINT, UCE**, and **Novae** for spatial data. References: **PCA**, **scVI** (CELLxGENE Census). Integration: **scGPT (integrated), scVI (de novo), Harmony, Seurat CCA, Seurat RPCA**.
 
-Containers, pinned versions, default checkpoints and per-method parameters: [Supported methods](https://svvord.github.io/scFM-eval-docs/reference/methods.html).
+Containers, pinned versions, default checkpoints and per-method parameters: [Supported methods](https://svvord.github.io/scFoundry-docs/reference/methods.html).
 
 ## Benchmark results
 
-Every method over 26 Tabula Sapiens v2 tissues (548,977 cells), with default settings throughout: [Benchmark results](https://svvord.github.io/scFM-eval-docs/results/) and the [interactive explorer](https://svvord.github.io/scFM-eval-docs/results/explorer.html). The tables are what `scfoundry benchmark` and `scfoundry geometry` compute, so your own numbers are directly comparable — see [Reproducing the paper](https://svvord.github.io/scFM-eval-docs/reproducing/).
+Every method over 26 Tabula Sapiens v2 tissues (548,977 cells), with default settings throughout: [Benchmark results](https://svvord.github.io/scFoundry-docs/results/) and the [interactive explorer](https://svvord.github.io/scFoundry-docs/results/explorer.html). The tables are what `scfoundry benchmark` and `scfoundry geometry` compute, so your own numbers are directly comparable — see [Reproducing the paper](https://svvord.github.io/scFoundry-docs/reproducing/).
 
 ## Citation
 
@@ -83,4 +83,4 @@ If scFoundry or the benchmark is useful for your research, please cite:
 }
 ```
 
-Please also cite the upstream paper of every model whose results you report — links on the [citation page](https://svvord.github.io/scFM-eval-docs/about/citation.html).
+Please also cite the upstream paper of every model whose results you report — links on the [citation page](https://svvord.github.io/scFoundry-docs/about/citation.html).
