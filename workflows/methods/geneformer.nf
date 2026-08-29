@@ -171,8 +171,8 @@ process _finetune_by_geneformer {
 
     container 'housy17/geneformer:latest'
 
-    publishDir "${params.finetune_results_dir}/finetune/finetuned_models",
-               saveAs: { filename -> "Geneformer/${id}" }, enabled: params.finetune_results_dir as boolean
+    publishDir "${params.finetune_results_dir}/finetune/finetuned_models", mode: 'copy',
+               saveAs: { filename -> "geneformer/${id}" }, enabled: params.finetune_results_dir as boolean
 
     input:
     tuple val(id), path(raw_h5ad), path(processed_raw_h5ad)
@@ -325,7 +325,7 @@ process _predict_by_geneformer {
     container 'housy17/geneformer:latest'
 
     publishDir "${params.finetune_results_dir}/finetune/prediction", mode: 'copy', pattern: "*_predictions.tsv", 
-               saveAs: { filename -> "Geneformer/${id}_predicted_probs.tsv" }, enabled: params.finetune_results_dir as boolean
+               saveAs: { filename -> "geneformer/${id}_predicted_probs.tsv" }, enabled: params.finetune_results_dir as boolean
 
     input:
     tuple val(id), path(test_h5ad), path(processed_raw_h5ad), path(model_weights)

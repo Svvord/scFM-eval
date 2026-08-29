@@ -11,7 +11,7 @@ process finetune_by_cell_classifier {
 
     container "housy17/scllms:latest"
 
-    publishDir "${params.finetune_results_dir}/finetune/finetuned_models",
+    publishDir "${params.finetune_results_dir}/finetune/finetuned_models", mode: 'copy',
                saveAs: { filename -> "${method}/${id}/posthoc_classifier" }, enabled: params.finetune_results_dir as boolean
 
     input:
@@ -97,6 +97,7 @@ workflow finetune_by_cellama {
     main:
         ModelWeight = _finetune_by_cellama(Raw_H5ad_Channel)
         TrainEmbeddings = embed_by_finetuned_cellama(Raw_H5ad_Channel.combine(ModelWeight, by:0))
+            .map { id, method, embedding -> tuple(id, "cellama", embedding) }
         finetune_by_cell_classifier(TrainEmbeddings)
 
     emit:
@@ -133,9 +134,9 @@ workflow predict_by_cellama {
         embed_by_finetuned_cellama(InputChannel)
         SecondChannel = embed_by_finetuned_cellama.out
             .combine(NormalizedChannel, by: 0)
-            .map{ id, method, embedding, foo, mw, emw -> tuple(id, method, embedding, mw)}
+            .map{ id, method, embedding, foo, mw, emw -> tuple(id, "cellama", embedding, mw)}
         predict_by_cell_classifier(SecondChannel)
-        get_prediction_labels(predict_by_cell_classifier.out.map{ id, prob -> tuple(id, "CELLama", prob)})
+        get_prediction_labels(predict_by_cell_classifier.out.map{ id, prob -> tuple(id, "cellama", prob)})
 
     emit:
         predict_by_cell_classifier.out
@@ -270,7 +271,7 @@ workflow predict_by_cellfm {
 
     main:
         _predict_by_cellfm(Raw_H5ad_and_Model_Weights_Channel)
-        get_prediction_labels(_predict_by_cellfm.out.map{ id, prob -> tuple(id, "CellFM", prob)})
+        get_prediction_labels(_predict_by_cellfm.out.map{ id, prob -> tuple(id, "cellfm", prob)})
 
     emit:
         _predict_by_cellfm.out
@@ -291,7 +292,7 @@ workflow predict_by_cellplm {
 
     main:
         _predict_by_cellplm(Raw_H5ad_and_Model_Weights_Channel)
-        get_prediction_labels(_predict_by_cellplm.out.map{ id, prob -> tuple(id, "CellPLM", prob)})
+        get_prediction_labels(_predict_by_cellplm.out.map{ id, prob -> tuple(id, "cellplm", prob)})
 
     emit:
         _predict_by_cellplm.out
@@ -327,7 +328,7 @@ workflow predict_by_sccello {
             .combine(Raw_H5ad_and_Model_Weights_Channel, by: 0)
             .map{ id, raw, processed, foo, model -> tuple(id, processed, model)}
         _predict_by_sccello(SecondChannel)
-        get_prediction_labels(_predict_by_sccello.out.map{ id, prob -> tuple(id, "scCello", prob)})
+        get_prediction_labels(_predict_by_sccello.out.map{ id, prob -> tuple(id, "sccello", prob)})
     
     emit:
         _predict_by_sccello.out
@@ -365,7 +366,7 @@ workflow predict_by_scbert {
             .combine(Raw_H5ad_and_Model_Weights_Channel, by: 0)
             .map{ id, processed, foo, model -> tuple(id, processed, model)}
         _predict_by_scbert(SecondChannel)
-        get_prediction_labels(_predict_by_scbert.out.map{ id, prob -> tuple(id, "scBERT", prob)})
+        get_prediction_labels(_predict_by_scbert.out.map{ id, prob -> tuple(id, "scbert", prob)})
     
     emit:
         _predict_by_scbert.out
@@ -402,7 +403,7 @@ workflow predict_by_scfoundation {
             .combine(Raw_H5ad_and_Model_Weights_Channel, by: 0)
             .map{ id, processed, foo, model -> tuple(id, processed, model)}
         _predict_by_scfoundation(SecondChannel)
-        get_prediction_labels(_predict_by_scfoundation.out.map{ id, prob -> tuple(id, "scFoundation", prob)})
+        get_prediction_labels(_predict_by_scfoundation.out.map{ id, prob -> tuple(id, "scfoundation", prob)})
     
     emit:
         _predict_by_scfoundation.out
@@ -464,7 +465,7 @@ workflow predict_by_scgpt {
 
     main:
         _predict_by_scgpt(Raw_H5ad_and_Model_Weights_Channel)
-        get_prediction_labels(_predict_by_scgpt.out.map{ id, prob -> tuple(id, "scGPT", prob)})
+        get_prediction_labels(_predict_by_scgpt.out.map{ id, prob -> tuple(id, "scgpt", prob)})
 
     emit:
         _predict_by_scgpt.out
@@ -502,7 +503,7 @@ workflow predict_by_langcell {
             .combine(Raw_H5ad_and_Model_Weights_Channel, by: 0)
             .map{ id, raw, tokenized, foo, model -> tuple(id, raw, tokenized, model)}
         _predict_by_langcell(SecondChannel)
-        get_prediction_labels(_predict_by_langcell.out.map{ id, prob -> tuple(id, "LangCell", prob)})
+        get_prediction_labels(_predict_by_langcell.out.map{ id, prob -> tuple(id, "langcell", prob)})
 
     emit:
         _predict_by_langcell.out
@@ -539,7 +540,7 @@ workflow predict_by_geneformer {
             .combine(Raw_H5ad_and_Model_Weights_Channel, by: 0)
             .map{ id, raw, processed, foo, model -> tuple(id, raw, processed, model)}
         _predict_by_geneformer(SecondChannel)
-        get_prediction_labels(_predict_by_geneformer.out.map{ id, prob -> tuple(id, "Geneformer", prob)})
+        get_prediction_labels(_predict_by_geneformer.out.map{ id, prob -> tuple(id, "geneformer", prob)})
     
     emit:
         _predict_by_geneformer.out

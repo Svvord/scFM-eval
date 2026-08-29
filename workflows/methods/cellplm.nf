@@ -85,8 +85,8 @@ process finetune_by_cellplm {
 
     container "housy17/cellplm:latest"
 
-    publishDir "${params.finetune_results_dir}/finetune/finetuned_models",
-               saveAs: { filename -> "CellPLM/${id}" }, enabled: params.finetune_results_dir as boolean
+    publishDir "${params.finetune_results_dir}/finetune/finetuned_models", mode: 'copy',
+               saveAs: { filename -> "cellplm/${id}" }, enabled: params.finetune_results_dir as boolean
 
     input:
     tuple val(id), path(raw_h5ad)
@@ -240,7 +240,7 @@ process predict_by_cellplm {
     container "housy17/cellplm:latest"
 
     publishDir "${params.finetune_results_dir}/finetune/prediction", mode: 'copy', pattern: "*_predictions.tsv", 
-               saveAs: { filename -> "CellPLM/${id}_predicted_probs.tsv" }, enabled: params.finetune_results_dir as boolean
+               saveAs: { filename -> "cellplm/${id}_predicted_probs.tsv" }, enabled: params.finetune_results_dir as boolean
 
     input:
     tuple val(id), path(test_h5ad), path(model_weights)

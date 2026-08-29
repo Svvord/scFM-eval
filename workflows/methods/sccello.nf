@@ -167,8 +167,8 @@ process _finetune_by_sccello {
 
     container "housy17/sccello:latest"
 
-    publishDir "${params.finetune_results_dir}/finetune/finetuned_models",
-               saveAs: { filename -> "scCello/${id}" }, enabled: params.finetune_results_dir as boolean
+    publishDir "${params.finetune_results_dir}/finetune/finetuned_models", mode: 'copy',
+               saveAs: { filename -> "sccello/${id}" }, enabled: params.finetune_results_dir as boolean
     
     input:
     tuple val(id), path(raw_h5ad), path(tokenized_dataset)
@@ -198,7 +198,7 @@ process _predict_by_sccello {
     container "housy17/sccello:latest"
 
     publishDir "${params.finetune_results_dir}/finetune/prediction", mode: 'copy', pattern: "*_predictions.tsv", 
-               saveAs: { filename -> "scCello/${id}_predicted_probs.tsv" }, enabled: params.finetune_results_dir as boolean
+               saveAs: { filename -> "sccello/${id}_predicted_probs.tsv" }, enabled: params.finetune_results_dir as boolean
 
     input:
     tuple val(id), path(processed_test_h5ad), path(model_weights)

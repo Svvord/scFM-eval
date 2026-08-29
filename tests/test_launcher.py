@@ -224,6 +224,26 @@ class CommandLineTests(unittest.TestCase):
         self.assertEqual(self.sb.run("transfer", "--method", "scgpt", "--reference", ref, "--fitted", model, "--dry-run", cwd=ws).returncode, 2)
         self.assertEqual(self.sb.run("transfer", "--method", "pca", "--reference", ref, "--dry-run", cwd=ws).returncode, 2)
 
+    def test_finetune_modes(self):
+        ws = os.path.join(self.sb.dir, "ws")
+        self.sb.run("init", ws, "--runtime", "apptainer")
+        ref, q = os.path.join(ws, "train.h5ad"), os.path.join(ws, "test.h5ad")
+        for f in (ref, q):
+            open(f, "w").close()
+        r = self.sb.run("finetune", "--method", "scgpt", "--reference", ref, "--query", q, "--epochs", "3", "--dry-run", cwd=ws)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        params = json.loads(r.stdout.split("params.json:")[1].split("command (")[0])
+        self.assertEqual(params["finetune_label_key"], "cell_type")
+        self.assertEqual(params["finetune_epoch"], 3)
+        self.assertTrue(params["finetune_results_dir"].endswith("/results"))
+        self.assertEqual(self.sb.run("finetune", "--method", "scgpt", "--query", q, "--dry-run", cwd=ws).returncode, 2)
+        model = os.path.join(ws, "model"); os.makedirs(model)
+        self.assertEqual(self.sb.run("finetune", "--method", "scgpt", "--query", q, "--fitted", model, "--dry-run", cwd=ws).returncode, 0)
+        # frozen-backbone methods are not fine-tuning methods
+        r = self.sb.run("finetune", "--method", "uce", "--reference", ref, "--dry-run", cwd=ws)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("does not support task", r.stderr)
+
     def test_dev_checkout_mode_omits_duplicate_config(self):
         # workspace == pipeline dir: Nextflow auto-loads <pipeline>/nextflow.config, so no -c
         r = self.sb.run("init", self.sb.pipeline, "--runtime", "apptainer")

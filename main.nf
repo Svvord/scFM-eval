@@ -18,12 +18,14 @@ params.task = null
 include { DOWNLOAD } from './workflows/tasks/download'
 include { EMBED } from './workflows/tasks/embed'
 include { TRANSFER } from './workflows/tasks/transfer'
+include { FINETUNE } from './workflows/tasks/finetune'
 
 workflow {
     def tasks = [
         'download': { DOWNLOAD() },
         'embed':    { EMBED() },
         'transfer': { TRANSFER() },
+        'finetune': { FINETUNE() },
     ]
 
     def selected = params.task ? params.task.toString().trim().toLowerCase() : null

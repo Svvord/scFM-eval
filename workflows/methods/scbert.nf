@@ -112,8 +112,8 @@ process _finetune_by_scbert {
 
     container "housy17/scbert:latest"
 
-    publishDir "${params.finetune_results_dir}/finetune/finetuned_models",
-               saveAs: { filename -> "scBERT/${id}" }, enabled: params.finetune_results_dir as boolean
+    publishDir "${params.finetune_results_dir}/finetune/finetuned_models", mode: 'copy',
+               saveAs: { filename -> "scbert/${id}" }, enabled: params.finetune_results_dir as boolean
 
     input:
     tuple val(id), path(processed_h5ad)
@@ -152,7 +152,7 @@ process _predict_by_scbert {
     container "housy17/scbert:latest"
 
     publishDir "${params.finetune_results_dir}/finetune/prediction", mode: 'copy', pattern: "*_predictions.tsv", 
-               saveAs: { filename -> "scBERT/${id}_predicted_probs.tsv" }, enabled: params.finetune_results_dir as boolean
+               saveAs: { filename -> "scbert/${id}_predicted_probs.tsv" }, enabled: params.finetune_results_dir as boolean
 
     input:
     tuple val(id), path(processed_test_h5ad), path(model_weights)

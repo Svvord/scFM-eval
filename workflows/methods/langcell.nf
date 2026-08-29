@@ -247,8 +247,8 @@ process _finetune_by_langcell {
 
     container "housy17/langcell:latest"
 
-    publishDir "${params.finetune_results_dir}/finetune/finetuned_models",
-               saveAs: { filename -> "LangCell/${id}" }, enabled: params.finetune_results_dir as boolean
+    publishDir "${params.finetune_results_dir}/finetune/finetuned_models", mode: 'copy',
+               saveAs: { filename -> "langcell/${id}" }, enabled: params.finetune_results_dir as boolean
     
     input:
     tuple val(id), path(raw_h5ad), path(tokenized_dataset)
@@ -411,7 +411,7 @@ process _predict_by_langcell {
     container "housy17/langcell:latest"
 
     publishDir "${params.finetune_results_dir}/finetune/prediction", mode: 'copy', pattern: "*_predictions.tsv", 
-               saveAs: { filename -> "LangCell/${id}_predicted_probs.tsv" }, enabled: params.finetune_results_dir as boolean
+               saveAs: { filename -> "langcell/${id}_predicted_probs.tsv" }, enabled: params.finetune_results_dir as boolean
 
     input:
     tuple val(id), path(raw_h5ad), path(tokenized_dataset), path(finetuned_model)

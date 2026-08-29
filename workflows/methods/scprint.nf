@@ -361,7 +361,7 @@ process _finetune_by_scprint {
 
     container 'housy17/scprint:latest'
 
-    publishDir "${params.finetune_results_dir}/finetune/finetuned_models",
+    publishDir "${params.finetune_results_dir}/finetune/finetuned_models", mode: 'copy',
                saveAs: { filename -> "scPRINT/${id}" }, enabled: params.finetune_results_dir as boolean
 
     input:

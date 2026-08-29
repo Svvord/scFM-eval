@@ -72,8 +72,8 @@ process finetune_by_scgpt {
 
     container 'housy17/scgpt:0.2.4'
 
-    publishDir "${params.finetune_results_dir}/finetune/finetuned_models",
-               saveAs: { filename -> "scGPT/${id}" }, enabled: params.finetune_results_dir as boolean
+    publishDir "${params.finetune_results_dir}/finetune/finetuned_models", mode: 'copy',
+               saveAs: { filename -> "scgpt/${id}" }, enabled: params.finetune_results_dir as boolean
 
     input:
     tuple val(id), path(raw_h5ad)
@@ -888,7 +888,7 @@ process predict_by_scgpt {
     container 'housy17/scgpt:0.2.4'
 
     publishDir "${params.finetune_results_dir}/finetune/prediction", mode: 'copy', pattern: "*_predictions.tsv", 
-               saveAs: { filename -> "scGPT/${id}_predicted_probs.tsv" }, enabled: params.finetune_results_dir as boolean
+               saveAs: { filename -> "scgpt/${id}_predicted_probs.tsv" }, enabled: params.finetune_results_dir as boolean
 
     input:
     tuple val(id), path(test_h5ad), path(model_weights)

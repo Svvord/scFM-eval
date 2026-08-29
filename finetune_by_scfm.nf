@@ -149,6 +149,8 @@ workflow finetune_and_predict {
 
 workflow {
 
+    log.warn "finetune_by_scfm.nf is deprecated; use 'scfoundry finetune --method <method> --reference <train.h5ad> --query <test.h5ad>' (or 'nextflow run main.nf --task finetune'). This entry point will be removed in a future release."
+
     if( !runners[ selected ] )
         exit 1, "Unknown method '${params.method}'. Allowed: ${runners.keySet().join(', ')}"
 

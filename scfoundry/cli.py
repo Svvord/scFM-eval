@@ -44,7 +44,7 @@ TASKS = OrderedDict([
     ("download",  dict(help="Download pretrained model checkpoints", implemented=True)),
     ("embed",     dict(help="Zero-shot cell embeddings", implemented=True)),
     ("transfer",  dict(help="Label transfer with frozen embeddings (prototype / knn / logreg / mlp)", implemented=True)),
-    ("finetune",  dict(help="Fine-tuning / label prediction", implemented=False)),
+    ("finetune",  dict(help="Supervised fine-tuning (parameter updates) / prediction", implemented=True)),
     ("benchmark", dict(help="Score embeddings (cell-type conservation, batch mixing)", implemented=False)),
 ])
 
@@ -582,6 +582,38 @@ def cmd_transfer(args, registry, extra):
     return launch("transfer", method, inp, params, args, extra)
 
 
+def cmd_finetune(args, registry, extra):
+    method = require_method(registry, "finetune", args.method)
+    if not args.reference and not args.query:
+        die("provide --reference (fine-tune), --reference and --query (fine-tune + predict), or --query with --fitted (predict)")
+    if args.query and not args.reference and not args.fitted:
+        die("--query without --reference needs --fitted <model_dir>")
+    if args.reference and args.fitted:
+        die("--fitted cannot be combined with --reference")
+    params = OrderedDict()
+    for key in ("reference", "query"):
+        val = getattr(args, key)
+        if val:
+            path = os.path.realpath(val)
+            if not os.path.isfile(path):
+                die("{} file not found: {}".format(key, val))
+            params[key] = path
+    if args.fitted:
+        fitted = os.path.realpath(args.fitted)
+        if not os.path.isdir(fitted):
+            die("--fitted must be a fine-tuned model directory: {}".format(args.fitted))
+        params["fitted"] = fitted
+    params["finetune_label_key"] = args.label_key or "cell_type"
+    if args.epochs is not None:
+        params["finetune_epoch"] = args.epochs
+    if args.batch_size is not None:
+        params["finetune_batch_size"] = args.batch_size
+    if args.model:
+        params["model"] = args.model
+    inp = input_id(args.query or args.reference)
+    return launch("finetune", method, inp, params, args, extra)
+
+
 def cmd_list(args, registry):
     if args.what == "tasks":
         print("{:<11} {:<12} {}".format("task", "status", "description"))
@@ -727,6 +759,22 @@ def build_parser():
     p.add_argument("--batch-size", type=int, help="embedding batch size (default: the method's default)")
     add_task_options(p)
 
+    p = sub.add_parser("finetune", help=TASKS["finetune"]["help"],
+                       description="Fine-tune a model on labelled reference cells following its authors' recipe "
+                                   "(model parameters are updated), then predict the query. Methods whose official "
+                                   "adaptation keeps the backbone frozen are available as 'transfer --classifier mlp'. "
+                                   "Outputs: <outdir>/finetune/finetuned_models/<method>/<ref-id>/ and "
+                                   "<outdir>/finetune/prediction/<method>/<query-id>_predicted_*.tsv")
+    p.add_argument("--method", required=True, help="method to fine-tune (see 'list methods --task finetune')")
+    p.add_argument("--reference", metavar="H5AD", help="labelled reference cells (fine-tune)")
+    p.add_argument("--query", metavar="H5AD", help="cells to label (predict)")
+    p.add_argument("--fitted", metavar="DIR", help="previously fine-tuned model directory (predict without --reference)")
+    p.add_argument("--label-key", default="cell_type", help="obs column with reference labels (default: cell_type)")
+    p.add_argument("--epochs", type=int, help="training epochs (default: the method's recipe)")
+    p.add_argument("--batch-size", type=int, help="training batch size (default: the method's recipe)")
+    p.add_argument("--model", help="pretrained model variant under data/model_weights (default: the method's default)")
+    add_task_options(p)
+
     p = sub.add_parser("list", help="list methods or tasks")
     p.add_argument("what", choices=["methods", "tasks"])
     p.add_argument("--task", help="only methods supporting this task")
@@ -774,6 +822,8 @@ def main(argv=None):
         return cmd_embed(args, registry, extra_nf_args)
     if args.command == "transfer":
         return cmd_transfer(args, registry, extra_nf_args)
+    if args.command == "finetune":
+        return cmd_finetune(args, registry, extra_nf_args)
     parser.error("unknown command {}".format(args.command))
 
 

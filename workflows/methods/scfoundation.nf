@@ -146,8 +146,8 @@ process _finetune_by_scfoundation {
 
     container 'housy17/scfoundation:latest'
 
-    publishDir "${params.finetune_results_dir}/finetune/finetuned_models",
-               saveAs: { filename -> "scFoundation/${id}" }, enabled: params.finetune_results_dir as boolean
+    publishDir "${params.finetune_results_dir}/finetune/finetuned_models", mode: 'copy',
+               saveAs: { filename -> "scfoundation/${id}" }, enabled: params.finetune_results_dir as boolean
 
     input:
     tuple val(id), path(processed_h5ad)
@@ -179,7 +179,7 @@ process _predict_by_scfoundation {
     container 'housy17/scfoundation:latest'
 
     publishDir "${params.finetune_results_dir}/finetune/prediction", mode: 'copy', pattern: "*_predictions.tsv", 
-               saveAs: { filename -> "scFoundation/${id}_predicted_probs.tsv" }, enabled: params.finetune_results_dir as boolean
+               saveAs: { filename -> "scfoundation/${id}_predicted_probs.tsv" }, enabled: params.finetune_results_dir as boolean
 
     input:
     tuple val(id), path(processed_test_h5ad), path(model_weights)

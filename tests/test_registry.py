@@ -12,7 +12,7 @@ TASK_FILES = {
     "download": ["workflows/tasks/download.nf"],
     "embed": ["workflows/tasks/embed.nf", "embed_by_scfm.nf"],
     "transfer": ["workflows/tasks/transfer.nf"],
-    "finetune": ["workflows/tasks/finetune.nf", "finetune_by_scfm.nf"],
+    "finetune": ["workflows/tasks/finetune.nf"],
 }
 
 
