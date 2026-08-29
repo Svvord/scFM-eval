@@ -143,7 +143,8 @@ class Workspace(object):
         return os.path.isfile(self.marker)
 
 
-def find_workspace(explicit=None):
+def find_workspace(explicit=None, quiet=False):
+    """Locate the workspace; with quiet=True a miss raises SystemExit without printing."""
     if explicit:
         ws = Workspace(explicit)
         if not ws.exists():
@@ -165,6 +166,8 @@ def find_workspace(explicit=None):
         if parent == cur:
             break
         cur = parent
+    if quiet:
+        raise SystemExit(1)
     die("not inside a scFoundry workspace. Run '{} init' in the directory you want to work in "
         "(or '{} init DIR'), or pass --workspace DIR.".format(PROG, PROG))
 
@@ -724,11 +727,11 @@ def cmd_info(args):
     nf_path = shutil.which(nf) if os.path.sep not in nf else nf
     print("nextflow   {}".format("{} ({})".format(nextflow_version(nf_path), nf_path) if nf_path else "not found"))
     try:
-        ws = find_workspace(args.workspace)
+        ws = find_workspace(args.workspace, quiet=not args.workspace)
         print("workspace  {}".format(ws.root))
         print("config     {}{}".format(ws.config, "" if os.path.isfile(ws.config) else "  (MISSING -- run init --force)"))
     except SystemExit:
-        print("workspace  none (run '{} init')".format(PROG))
+        print("workspace  (none)  -- run '{} init' to create one".format(PROG))
     return 0
 
 
