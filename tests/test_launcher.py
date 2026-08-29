@@ -259,6 +259,18 @@ class CommandLineTests(unittest.TestCase):
         self.assertEqual((params["method"], params["metrics"], params["batch_key"], params["clustering"]), ("scgpt", "all", "donor", "kmeans"))
         self.assertEqual(self.sb.run("benchmark", "--embedding", os.path.join(ws, "nope.h5ad"), "--dry-run", cwd=ws).returncode, 2)
 
+    def test_check_inputs(self):
+        ws = os.path.join(self.sb.dir, "ws")
+        self.sb.run("init", ws, "--runtime", "apptainer")
+        data = os.path.join(ws, "cells.h5ad"); open(data, "w").close()
+        r = self.sb.run("check", "--data", data, "--method", "geneformer", "--role", "reference", "--dry-run", cwd=ws)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        params = json.loads(r.stdout.split("params.json:")[1].split("command (")[0])
+        self.assertEqual((params["task"], params["method"], params["role"], params["label_key"]), ("check", "geneformer", "reference", "cell_type"))
+        self.assertEqual(params["data"], os.path.realpath(data))
+        self.assertEqual(self.sb.run("check", "--data", data, "--method", "nope", "--dry-run", cwd=ws).returncode, 2)
+        self.assertEqual(self.sb.run("check", "--data", os.path.join(ws, "nope.h5ad"), "--dry-run", cwd=ws).returncode, 2)
+
     def test_geometry_inputs(self):
         ws = os.path.join(self.sb.dir, "ws")
         self.sb.run("init", ws, "--runtime", "apptainer")

@@ -16,6 +16,7 @@ nextflow.enable.dsl=2
 params.task = null
 
 include { DOWNLOAD } from './workflows/tasks/download'
+include { CHECK } from './workflows/tasks/check'
 include { EMBED } from './workflows/tasks/embed'
 include { TRANSFER } from './workflows/tasks/transfer'
 include { FINETUNE } from './workflows/tasks/finetune'
@@ -25,6 +26,7 @@ include { GEOMETRY } from './workflows/tasks/geometry'
 workflow {
     def tasks = [
         'download': { DOWNLOAD() },
+        'check':    { CHECK() },
         'embed':    { EMBED() },
         'transfer': { TRANSFER() },
         'finetune': { FINETUNE() },

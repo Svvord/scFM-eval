@@ -47,6 +47,7 @@ Input is an AnnData `.h5ad` with **raw counts over the full transcriptome**; see
 | Task | What it does | Guide |
 |---|---|---|
 | `download` | fetch a model's official checkpoint | [Model weights](https://svvord.github.io/scFoundry-docs/getting-started/model-weights.html) |
+| `check` | advisory report on whether an `.h5ad` satisfies the input contract | [Input data format](https://svvord.github.io/scFoundry-docs/data/input-format.html#checking-a-file-before-you-run) |
 | `embed` | cell embeddings: zero-shot scFMs, PCA / scVI references, batch-integration methods | [Embed](https://svvord.github.io/scFoundry-docs/tasks/embed.html) |
 | `transfer` | label a query from a labelled reference on frozen embeddings (logreg / prototype / kNN / MLP) | [Transfer](https://svvord.github.io/scFoundry-docs/tasks/transfer.html) |
 | `finetune` | update a model's parameters with its authors' recipe, then predict | [Fine-tune](https://svvord.github.io/scFoundry-docs/tasks/finetune.html) |

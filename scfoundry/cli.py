@@ -42,6 +42,7 @@ CONTAINER_RUNTIMES = ("apptainer", "singularity", "docker")
 # `scfoundry list tasks` as planned and are added one release at a time.
 TASKS = OrderedDict([
     ("download",  dict(help="Download pretrained model checkpoints", implemented=True)),
+    ("check",     dict(help="Check .h5ad files against the input contract (advisory report)", implemented=True)),
     ("embed",     dict(help="Zero-shot cell embeddings", implemented=True)),
     ("transfer",  dict(help="Label transfer with frozen embeddings (prototype / knn / logreg / mlp)", implemented=True)),
     ("finetune",  dict(help="Supervised fine-tuning (parameter updates) / prediction", implemented=True)),
@@ -52,6 +53,7 @@ TASKS = OrderedDict([
 # Nextflow parameters that receive --outdir, per task (all set to the same path).
 OUTDIR_PARAMS = {
     "download": [],
+    "check": ["results_dir"],
     "embed": ["emb_results_dir"],
     "transfer": ["emb_results_dir", "transfer_results_dir"],
     "finetune": ["emb_results_dir", "finetune_results_dir"],
@@ -619,6 +621,31 @@ def cmd_finetune(args, registry, extra):
     return launch("finetune", method, inp, params, args, extra)
 
 
+def cmd_check(args, registry, extra):
+    spec = args.data
+    path = os.path.realpath(spec)
+    if os.path.isdir(path):
+        inp = os.path.basename(path.rstrip("/"))
+    elif os.path.isfile(path):
+        inp = input_id(path)
+    elif any(ch in spec for ch in "*?["):
+        inp = safe_id(os.path.basename(os.path.dirname(path)) or "glob")
+    else:
+        die("input path not found: {}".format(spec))
+    method = ""
+    if args.method:
+        method = args.method.strip().lower()
+        if method not in registry:
+            die("unknown method '{}' (see 'scfoundry list methods')".format(args.method))
+    params = OrderedDict([("data", path if not any(ch in spec for ch in "*?[") else spec),
+                          ("label_key", args.label_key), ("batch_key", args.batch_key)])
+    if method:
+        params["method"] = method
+    if args.role:
+        params["role"] = args.role
+    return launch("check", method or "input", inp, params, args, extra)
+
+
 def cmd_benchmark(args, extra):
     spec = args.embedding
     path = os.path.realpath(spec)
@@ -831,6 +858,19 @@ def build_parser():
     p.add_argument("--model", help="pretrained model variant under data/model_weights (default: the method's default)")
     add_task_options(p)
 
+    p = sub.add_parser("check", help=TASKS["check"]["help"],
+                       description="Check .h5ad files against the input contract before spending GPU time: raw "
+                                   "counts in X, full transcriptome, unique gene and cell identifiers, the "
+                                   "gene_symbol / ensembl_id / barcode columns, and the label, batch or spatial "
+                                   "columns a task or method reads. Advisory: prints OK / WARN / FAIL lines per "
+                                   "file, changes nothing, always exits 0. Report copied to <outdir>/check/.")
+    p.add_argument("--data", required=True, metavar="PATH", help="input .h5ad, a directory of them, or a glob")
+    p.add_argument("--method", help="method the file is meant for, e.g. geneformer (adds its specific checks)")
+    p.add_argument("--label-key", default="cell_type", help="obs column with cell-type labels (default: cell_type)")
+    p.add_argument("--batch-key", default="batch_id", help="obs column with batch labels (default: batch_id)")
+    p.add_argument("--role", choices=("reference", "query"), help="reference: labels are required; query: labels optional")
+    add_task_options(p)
+
     p = sub.add_parser("benchmark", help=TASKS["benchmark"]["help"],
                        description="Score embedding files produced by `embed`: biological conservation on the "
                                    "cell-type labels (NMI, HOM, COM, FMI, ARI on Leiden/KMeans clusters; ASW, cLISI, "
@@ -910,6 +950,8 @@ def main(argv=None):
         return cmd_transfer(args, registry, extra_nf_args)
     if args.command == "finetune":
         return cmd_finetune(args, registry, extra_nf_args)
+    if args.command == "check":
+        return cmd_check(args, registry, extra_nf_args)
     if args.command == "benchmark":
         return cmd_benchmark(args, extra_nf_args)
     if args.command == "geometry":
