@@ -71,7 +71,7 @@ If scFoundry or the benchmark is useful for your research, please cite:
 
 > Siyu Hou, Penghui Yang, Wenjing Ma, Jinxi Xiang, Jade Xiaoqing Wang, Hui Wan, Ying Ma and Xiang Zhou (2026).
 > Accessible and reproducible deployment reveals the practical boundaries of single-cell foundation models.
-> bioRxiv. *(The revised version with this title replaces the current bioRxiv preprint within one to two weeks.)*
+> bioRxiv, https://doi.org/10.64898/2026.01.06.698060 *(the revised version with this title replaces the current preprint at this DOI within one to two weeks)*
 
 ```
 @article{hou2026accessible,
@@ -79,7 +79,9 @@ If scFoundry or the benchmark is useful for your research, please cite:
   author = {Hou, Siyu and Yang, Penghui and Ma, Wenjing and Xiang, Jinxi and Wang, Jade Xiaoqing and Wan, Hui and Ma, Ying and Zhou, Xiang},
   year = {2026},
   publisher = {Cold Spring Harbor Laboratory},
-  journal = {bioRxiv}
+  journal = {bioRxiv},
+  doi = {10.64898/2026.01.06.698060},
+  url = {https://doi.org/10.64898/2026.01.06.698060}
 }
 ```
 
