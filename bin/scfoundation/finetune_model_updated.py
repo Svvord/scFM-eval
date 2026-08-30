@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader, Dataset
 from torch.utils.data import Subset
 from sklearn.model_selection import train_test_split
 from scipy.sparse import issparse
+from input_normalization import normalize_log1p
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -49,10 +50,9 @@ class WarmupCosineScheduler(torch.optim.lr_scheduler._LRScheduler):
 
 class FineTuneDataset(Dataset):
     def __init__(self, adata):
-        if issparse(adata.X):
-            self.data = adata.X.toarray()
-        else:
-            self.data = adata.X
+        # Raw counts -> log1p(1e4-normalised), the representation the backbone was
+        # pretrained on and the one get_embedding.py feeds it (see input_normalization.py).
+        self.data = normalize_log1p(adata.X)
         self.labels = adata.obs['cell_type'].tolist()
     
     def __len__(self):
